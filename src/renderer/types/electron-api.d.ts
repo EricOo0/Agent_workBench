@@ -4,6 +4,15 @@ import type { AgentEvent } from '../../shared/agentEvents';
 import type { AutoMergeRequest } from '../lib/prStatus';
 import type { DiffPayload } from '../../shared/diff/types';
 import type { GitIndexUpdateArgs } from '../../shared/git/types';
+import type {
+  KnowledgeCard,
+  KnowledgeCardFilters,
+  KnowledgeCandidate,
+  KnowledgeInboxFilters,
+  KnowledgeOverviewPayload,
+  KnowledgeSessionSummary,
+  KnowledgeCandidateStatus,
+} from '../../shared/knowledge/types';
 import type { ResourceMetricsSnapshot } from '../../shared/performanceTypes';
 
 type ProjectSettingsPayload = {
@@ -68,6 +77,43 @@ declare global {
       onMenuUndo: (listener: () => void) => () => void;
       onMenuRedo: (listener: () => void) => () => void;
       onMenuCloseTab: (listener: () => void) => () => void;
+
+      // Knowledge workbench
+      getSessionSummary: (args: { sessionId: string }) => Promise<{
+        success: boolean;
+        data?: KnowledgeSessionSummary;
+        error?: string;
+      }>;
+      listKnowledgeCandidates: (args?: {
+        filters?: KnowledgeInboxFilters;
+      }) => Promise<{
+        success: boolean;
+        data?: KnowledgeCandidate[];
+        error?: string;
+      }>;
+      reviewKnowledgeCandidate: (args: {
+        candidateId: string;
+        status: Exclude<KnowledgeCandidateStatus, 'new'>;
+        note?: string;
+      }) => Promise<{
+        success: boolean;
+        data?: KnowledgeCandidate;
+        error?: string;
+      }>;
+      listKnowledgeCards: (args?: {
+        filters?: KnowledgeCardFilters;
+      }) => Promise<{
+        success: boolean;
+        data?: KnowledgeCard[];
+        error?: string;
+      }>;
+      getKnowledgeOverview: (args?: {
+        filters?: KnowledgeInboxFilters;
+      }) => Promise<{
+        success: boolean;
+        data?: KnowledgeOverviewPayload;
+        error?: string;
+      }>;
 
       // PTY
       ptyStart: (opts: {

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { KnowledgeCandidate } from '../../shared/knowledge/types';
 
 vi.mock('../../main/db/path', () => ({
   resolveDatabasePath: () => '/tmp/emdash-schema-contract-test.db',
@@ -71,5 +72,10 @@ describe('DatabaseService schema contract', () => {
         'conversations.task_id',
       ]);
     }
+  });
+
+  it('anchors the shared knowledge candidate surface', () => {
+    const knowledgeCandidate: Pick<KnowledgeCandidate, 'status'> = { status: 'new' };
+    expect(typeof knowledgeCandidate.status).toBe('string');
   });
 });
