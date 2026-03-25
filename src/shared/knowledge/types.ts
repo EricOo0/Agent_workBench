@@ -1,17 +1,37 @@
-export type SessionLifecycleState =
-  | 'active'
-  | 'idle'
-  | 'ending'
-  | 'ended'
-  | 'distilling'
-  | 'distilled'
-  | 'distill_failed';
+export const knowledgeSessionLifecycleStates = [
+  'active',
+  'idle',
+  'ending',
+  'ended',
+  'distilling',
+  'distilled',
+  'distill_failed',
+] as const;
 
-export type DistillationStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'skipped';
-export type KnowledgeCandidateStatus = 'new' | 'reviewed' | 'promoted' | 'rejected' | 'archived';
-export type KnowledgeCardStatus = 'active' | 'archived';
+export type SessionLifecycleState = (typeof knowledgeSessionLifecycleStates)[number];
 
-export interface KnowledgeRuntimeStats {
+export const knowledgeDistillationStatuses = [
+  'queued',
+  'running',
+  'succeeded',
+  'failed',
+  'skipped',
+] as const;
+export type DistillationStatus = (typeof knowledgeDistillationStatuses)[number];
+
+export const knowledgeCandidateStatuses = [
+  'new',
+  'reviewed',
+  'promoted',
+  'rejected',
+  'archived',
+] as const;
+export type KnowledgeCandidateStatus = (typeof knowledgeCandidateStatuses)[number];
+
+export const knowledgeCardStatuses = ['active', 'archived'] as const;
+export type KnowledgeCardStatus = (typeof knowledgeCardStatuses)[number];
+
+export interface KnowledgeOverviewStats {
   totalSessions: number;
   activeSessions: number;
   idleSessions: number;
@@ -75,7 +95,6 @@ export interface KnowledgeCard {
 export interface KnowledgeSessionSummary {
   sessionId: string;
   lifecycleState: SessionLifecycleState;
-  runtimeStats: KnowledgeRuntimeStats;
   distillation?: KnowledgeDistillationRecord | null;
   candidate?: KnowledgeCandidate | null;
   card?: KnowledgeCard | null;
@@ -94,20 +113,17 @@ export interface KnowledgeInboxFilters {
 export interface KnowledgeCardFilters {
   query?: string;
   status?: KnowledgeCardStatus[];
-  candidateStatuses?: KnowledgeCandidateStatus[];
   limit?: number;
   offset?: number;
 }
 
 export interface KnowledgeOverviewPayload {
-  runtimeStats: KnowledgeRuntimeStats;
+  overviewStats: KnowledgeOverviewStats;
   sessionSummaryCount: number;
   candidateCount: number;
   cardCount: number;
   candidateStatusCounts: Record<KnowledgeCandidateStatus, number>;
   cardStatusCounts: Record<KnowledgeCardStatus, number>;
   distillationStatusCounts: Record<DistillationStatus, number>;
-  inboxFilters: KnowledgeInboxFilters;
-  knowledgeFilters: KnowledgeCardFilters;
   updatedAt: number;
 }
