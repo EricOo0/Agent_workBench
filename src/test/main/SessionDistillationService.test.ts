@@ -236,7 +236,7 @@ describe('SessionDistillationService', () => {
       expect.objectContaining({
         id: 'distillation-1',
         status: 'running',
-        promptVersion: 'session-distillation.v1',
+        promptVersion: 'session-distillation.v2',
       })
     );
     expect(upsertSessionDistillation).toHaveBeenNthCalledWith(

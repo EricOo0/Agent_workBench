@@ -61,6 +61,7 @@ describe('SessionSummaryPanel', () => {
     expect(markup).toContain('Ready');
     expect(markup).toContain('Persist summary cards');
     expect(markup).toContain('Capture a compact summary block and surface it near task metadata.');
+    expect(markup).toContain('Edit prompt');
     expect(markup).toContain('Open Inbox');
   });
 
@@ -73,10 +74,13 @@ describe('SessionSummaryPanel', () => {
           id: 'distill-2',
           sessionId: 'pty:codex:main:task-1',
           status: 'failed',
+          provider: 'codex',
+          promptVersion: 'session-distillation.v2',
           startedAt: Date.UTC(2026, 2, 26, 3, 0, 0),
           updatedAt: Date.UTC(2026, 2, 26, 3, 2, 0),
           finishedAt: Date.UTC(2026, 2, 26, 3, 2, 0),
           errorMessage: 'Structured output parse failed',
+          rawResponse: '{"unexpected":"shape"}',
           evidenceRefs: [],
         },
         candidate: null,
@@ -87,7 +91,13 @@ describe('SessionSummaryPanel', () => {
 
     expect(markup).toContain('Failed');
     expect(markup).toContain('Structured output parse failed');
+    expect(markup).toContain('Edit prompt');
     expect(markup).toContain('Retry');
+    expect(markup).toContain('Failure details');
+    expect(markup).toContain('Provider: codex');
+    expect(markup).toContain('Prompt: session-distillation.v2');
+    expect(markup).toContain('Raw output');
+    expect(markup).toContain('{&quot;unexpected&quot;:&quot;shape&quot;}');
   });
 
   it('renders candidate count when only source candidates exist', () => {

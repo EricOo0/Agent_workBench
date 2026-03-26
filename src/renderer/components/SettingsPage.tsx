@@ -27,6 +27,7 @@ import TaskHoverActionCard from './TaskHoverActionCard';
 import TerminalSettingsCard from './TerminalSettingsCard';
 import HiddenToolsSettingsCard from './HiddenToolsSettingsCard';
 import ReviewAgentSettingsCard from './ReviewAgentSettingsCard';
+import KnowledgeDistillationSettingsCard from './KnowledgeDistillationSettingsCard';
 import ResourceMonitorSettingsCard from './ResourceMonitorSettingsCard';
 import { AccountTab } from './settings/AccountTab';
 import { WorkspaceProviderInfoCard } from './WorkspaceProviderInfoCard';
@@ -230,6 +231,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ initialTab, onClose 
       sections: [
         { component: <DefaultAgentSettingsCard /> },
         { component: <ReviewAgentSettingsCard /> },
+        { component: <KnowledgeDistillationSettingsCard /> },
         {
           title: 'CLI agents',
           component: (

@@ -54,10 +54,15 @@ export interface KnowledgeDistillationRecord {
   id: string;
   sessionId: string;
   status: DistillationStatus;
+  provider?: string | null;
+  promptVersion?: string | null;
   startedAt: number;
   updatedAt: number;
   finishedAt?: number | null;
   errorMessage?: string | null;
+  rawResponse?: string | null;
+  summaryMarkdown?: string | null;
+  finalConclusion?: string | null;
   evidenceRefs: KnowledgeEvidenceRef[];
 }
 
@@ -153,11 +158,16 @@ export interface KnowledgeCardFilters {
 
 export interface KnowledgeOverviewPayload {
   overviewStats: KnowledgeOverviewStats;
+  activeTaskCount: number;
   sessionSummaryCount: number;
   candidateCount: number;
   cardCount: number;
   candidateStatusCounts: Record<KnowledgeCandidateStatus, number>;
   cardStatusCounts: Record<KnowledgeCardStatus, number>;
   distillationStatusCounts: Record<DistillationStatus, number>;
+  tokenUsageTotal?: number | null;
+  tokenInput?: number | null;
+  tokenOutput?: number | null;
+  agentActiveDurationMs?: number | null;
   updatedAt: number;
 }

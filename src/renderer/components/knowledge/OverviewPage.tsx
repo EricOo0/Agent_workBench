@@ -6,6 +6,7 @@ import type {
 } from '@shared/knowledge/types';
 import { knowledgeApi } from '@/lib/knowledgeApi';
 import { cn } from '@/lib/utils';
+import { getKnowledgeTaskIdFromSessionId } from '@/lib/knowledgeSessionRouting';
 
 export type OverviewRange = '7d' | '30d';
 
@@ -15,8 +16,7 @@ export interface OverviewStats {
   distilledToday: number;
   inboxPending: number;
   promotedCards: number;
-  tokenInput: number;
-  tokenOutput: number;
+  tokenUsageTotal: number | null;
   agentActiveHours: number;
 }
 
@@ -56,13 +56,12 @@ type UnknownRecord = Record<string, unknown>;
 
 const rangeOptions: OverviewRange[] = ['7d', '30d'];
 
-function getTaskIdFromSessionId(sessionId: string): string {
-  const parts = sessionId.split(':').filter(Boolean);
-  return parts[parts.length - 1] || sessionId;
-}
-
 function formatNumber(value: number): string {
   return new Intl.NumberFormat().format(value);
+}
+
+function formatMetricNumber(value: number | null): string {
+  return value === null ? 'N/A' : formatNumber(value);
 }
 
 function formatHours(value: number): string {
@@ -133,30 +132,24 @@ function extractUsageMetrics(overview: KnowledgeOverviewPayload, range: Overview
   const runtime = isRecord(root) ? root.runtime : null;
   const rangeRuntime = rangeSnapshot?.runtime;
 
-  const tokenInput =
-    readNumericValue(rangeSnapshot, ['inputTokens', 'tokenInput', 'tokensIn']) ??
-    readNumericValue(rangeUsage, ['inputTokens', 'tokenInput', 'tokensIn']) ??
-    readNumericValue(root, ['inputTokens', 'tokenInput', 'tokensIn']) ??
-    readNumericValue(usage, ['inputTokens', 'tokenInput', 'tokensIn']) ??
-    0;
-
-  const tokenOutput =
-    readNumericValue(rangeSnapshot, ['outputTokens', 'tokenOutput', 'tokensOut']) ??
-    readNumericValue(rangeUsage, ['outputTokens', 'tokenOutput', 'tokensOut']) ??
-    readNumericValue(root, ['outputTokens', 'tokenOutput', 'tokensOut']) ??
-    readNumericValue(usage, ['outputTokens', 'tokenOutput', 'tokensOut']) ??
-    0;
+  const tokenUsageTotal =
+    readNumericValue(rangeSnapshot, ['tokenUsageTotal', 'tokensUsed', 'totalTokens']) ??
+    readNumericValue(rangeUsage, ['tokenUsageTotal', 'tokensUsed', 'totalTokens']) ??
+    readNumericValue(root, ['tokenUsageTotal', 'tokensUsed', 'totalTokens']) ??
+    readNumericValue(usage, ['tokenUsageTotal', 'tokensUsed', 'totalTokens']) ??
+    overview.tokenUsageTotal ??
+    null;
 
   const activeDurationMs =
     readNumericValue(rangeSnapshot, ['activeDurationMs', 'agentActiveDurationMs']) ??
     readNumericValue(rangeRuntime, ['activeDurationMs', 'agentActiveDurationMs']) ??
     readNumericValue(root, ['activeDurationMs', 'agentActiveDurationMs']) ??
     readNumericValue(runtime, ['activeDurationMs', 'agentActiveDurationMs']) ??
+    overview.agentActiveDurationMs ??
     0;
 
   return {
-    tokenInput,
-    tokenOutput,
+    tokenUsageTotal,
     agentActiveHours: activeDurationMs > 0 ? activeDurationMs / (60 * 60 * 1000) : 0,
   };
 }
@@ -194,7 +187,7 @@ function deriveRecentSessions(
     }));
 }
 
-function deriveStats(
+export function deriveStats(
   overview: KnowledgeOverviewPayload | null,
   candidates: KnowledgeCandidate[],
   range: OverviewRange,
@@ -203,21 +196,13 @@ function deriveStats(
   const rangeStart = getRangeStart(range, now);
   const todayStart = startOfToday(now);
   const scopedCandidates = candidates.filter((candidate) => candidate.updatedAt >= rangeStart);
-  const scopedTaskIds = new Set(
-    scopedCandidates.map((candidate) => getTaskIdFromSessionId(candidate.sessionId))
-  );
-  const scopedSessionIds = new Set(scopedCandidates.map((candidate) => candidate.sessionId));
   const usage = overview
     ? extractUsageMetrics(overview, range)
-    : { tokenInput: 0, tokenOutput: 0, agentActiveHours: 0 };
+    : { tokenUsageTotal: null, agentActiveHours: 0 };
 
   return {
-    activeSessions:
-      scopedSessionIds.size ||
-      overview?.overviewStats.activeSessions ||
-      overview?.overviewStats.totalSessions ||
-      0,
-    activeTasks: scopedTaskIds.size,
+    activeSessions: overview?.overviewStats.activeSessions ?? 0,
+    activeTasks: overview?.activeTaskCount ?? 0,
     distilledToday: scopedCandidates.filter(
       (candidate) =>
         candidate.updatedAt >= todayStart && candidate.distillation?.status === 'succeeded'
@@ -229,8 +214,7 @@ function deriveStats(
       scopedCandidates.filter((candidate) => Boolean(candidate.promotedCardId)).length ||
       overview?.candidateStatusCounts.promoted ||
       0,
-    tokenInput: usage.tokenInput,
-    tokenOutput: usage.tokenOutput,
+    tokenUsageTotal: usage.tokenUsageTotal,
     agentActiveHours: usage.agentActiveHours,
   };
 }
@@ -255,8 +239,7 @@ export function OverviewPageView({
     { label: 'Distilled today', value: formatNumber(stats.distilledToday) },
     { label: 'Inbox pending', value: formatNumber(stats.inboxPending) },
     { label: 'Promoted cards', value: formatNumber(stats.promotedCards) },
-    { label: 'Token input', value: formatNumber(stats.tokenInput) },
-    { label: 'Token output', value: formatNumber(stats.tokenOutput) },
+    { label: 'Tokens used', value: formatMetricNumber(stats.tokenUsageTotal) },
     { label: 'Agent active hours', value: formatHours(stats.agentActiveHours) },
   ];
 
@@ -362,7 +345,8 @@ export function OverviewPageView({
                       <p className="text-sm text-muted-foreground">{session.summary}</p>
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      Session {session.sessionId} · Task {getTaskIdFromSessionId(session.sessionId)}
+                      Session {session.sessionId} · Task{' '}
+                      {getKnowledgeTaskIdFromSessionId(session.sessionId) ?? 'Unknown'}
                     </p>
                   </div>
 

@@ -200,7 +200,7 @@ export function InboxPageView({
       </div>
 
       <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden xl:grid-cols-[22rem_minmax(0,1fr)]">
-        <div className="border-b border-border xl:border-b-0 xl:border-r">
+        <div className="min-h-0 border-b border-border xl:border-b-0 xl:border-r">
           <div className="flex h-full min-h-0 flex-col">
             <div className="border-b border-border px-4 py-3 text-sm text-muted-foreground">
               {isLoading ? 'Loading candidates...' : `${candidates.length} candidate(s)`}

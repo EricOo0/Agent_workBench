@@ -38,6 +38,7 @@ export type EndSessionArgs = {
   cause?: 'process_exit' | 'manual_kill' | 'app_quit' | 'owner_destroyed';
   exitCode?: number | null;
   signal?: number | string;
+  usageMetadata?: Record<string, unknown> | null;
 };
 
 export class KnowledgeCaptureService {
@@ -127,6 +128,7 @@ export class KnowledgeCaptureService {
       endCause: args.cause ?? null,
       exitCode: args.exitCode ?? null,
       signal: args.signal ?? null,
+      ...(args.usageMetadata ?? {}),
     });
     return this.cloneState(state);
   }

@@ -89,6 +89,7 @@ function waitForSshPromptThenWrite(
 }
 
 const providerPtyTimers = new Map<string, number>();
+const knowledgeSessionStartPromises = new Map<string, Promise<void>>();
 // Map PTY IDs to provider IDs for multi-agent tracking
 const ptyProviderMap = new Map<string, ProviderId>();
 // Prevent duplicate finish handling when cleanup and onExit race for the same PTY.
@@ -1482,21 +1483,54 @@ export function registerPtyIpc(): void {
 
 function parseProviderPty(id: string): {
   providerId: ProviderId;
+  kind: 'main' | 'chat';
   taskId: string;
 } | null {
   const parsed = parsePtyId(id);
   if (!parsed) return null;
-  return { providerId: parsed.providerId, taskId: parsed.suffix };
+  return { providerId: parsed.providerId, kind: parsed.kind, taskId: parsed.suffix };
 }
 
 function providerRunKey(providerId: ProviderId, taskId: string) {
   return `${providerId}:${taskId}`;
 }
 
+async function resolveKnowledgeTaskIdForPty(id: string): Promise<string> {
+  const parsed = parsePtyId(id);
+  if (!parsed) return id;
+  if (parsed.kind === 'main') return parsed.suffix;
+
+  const conversation = await databaseService.getConversationById(parsed.suffix);
+  return conversation?.taskId ?? parsed.suffix;
+}
+
+function queueKnowledgeSessionStart(args: {
+  id: string;
+  providerId: ProviderId;
+  startedAt: number;
+}): void {
+  const startPromise = (async () => {
+    const taskId = await resolveKnowledgeTaskIdForPty(args.id);
+    await knowledgeCaptureService.startSession({
+      sessionId: args.id,
+      taskId,
+      provider: args.providerId,
+      startedAt: args.startedAt,
+    });
+  })().catch((error) => {
+    log.warn('ptyIpc: failed to start knowledge capture session', {
+      id: args.id,
+      providerId: args.providerId,
+      error: String(error),
+    });
+  });
+
+  knowledgeSessionStartPromises.set(args.id, startPromise);
+}
+
 function maybeMarkProviderStart(id: string, providerId?: ProviderId) {
   finalizedPtys.delete(id);
   const parsed = parseProviderPty(id);
-  const taskId = parsed?.taskId ?? id;
 
   // First check if we have a direct provider ID (for multi-agent mode)
   if (providerId && PROVIDER_IDS.includes(providerId)) {
@@ -1505,12 +1539,7 @@ function maybeMarkProviderStart(id: string, providerId?: ProviderId) {
     if (providerPtyTimers.has(key)) return;
     const startedAt = Date.now();
     providerPtyTimers.set(key, startedAt);
-    void knowledgeCaptureService.startSession({
-      sessionId: id,
-      taskId,
-      provider: providerId,
-      startedAt,
-    });
+    queueKnowledgeSessionStart({ id, providerId, startedAt });
     telemetry.capture('agent_run_start', { provider: providerId });
     return;
   }
@@ -1522,12 +1551,7 @@ function maybeMarkProviderStart(id: string, providerId?: ProviderId) {
     if (providerPtyTimers.has(key)) return;
     const startedAt = Date.now();
     providerPtyTimers.set(key, startedAt);
-    void knowledgeCaptureService.startSession({
-      sessionId: id,
-      taskId,
-      provider: storedProvider,
-      startedAt,
-    });
+    queueKnowledgeSessionStart({ id, providerId: storedProvider, startedAt });
     telemetry.capture('agent_run_start', { provider: storedProvider });
     return;
   }
@@ -1538,12 +1562,7 @@ function maybeMarkProviderStart(id: string, providerId?: ProviderId) {
   if (providerPtyTimers.has(key)) return;
   const startedAt = Date.now();
   providerPtyTimers.set(key, startedAt);
-  void knowledgeCaptureService.startSession({
-    sessionId: id,
-    taskId: parsed.taskId,
-    provider: parsed.providerId,
-    startedAt,
-  });
+  queueKnowledgeSessionStart({ id, providerId: parsed.providerId, startedAt });
   telemetry.capture('agent_run_start', { provider: parsed.providerId });
 }
 
@@ -1555,22 +1574,6 @@ function maybeMarkProviderFinish(
 ) {
   if (finalizedPtys.has(id)) return;
   finalizedPtys.add(id);
-
-  if (cause === 'process_exit' || cause === 'manual_kill') {
-    void knowledgeCaptureService.endSession(id, {
-      endedAt: Date.now(),
-      cause,
-      exitCode: typeof exitCode === 'number' ? exitCode : null,
-      signal,
-    });
-    void sessionDistillationService.runDistillationForSession(id).catch((error) => {
-      log.warn('ptyIpc: session distillation failed', {
-        id,
-        cause,
-        error: String(error),
-      });
-    });
-  }
 
   let providerId: ProviderId | undefined;
   let key: string;
@@ -1593,6 +1596,49 @@ function maybeMarkProviderFinish(
 
   // Clean up the provider mapping
   ptyProviderMap.delete(id);
+
+  if (cause === 'process_exit' || cause === 'manual_kill') {
+    void (async () => {
+      const startPromise = knowledgeSessionStartPromises.get(id);
+      if (startPromise) {
+        await startPromise;
+      }
+      knowledgeSessionStartPromises.delete(id);
+
+      let usageMetadata: Record<string, unknown> | null = null;
+
+      if (providerId === 'codex') {
+        const threadId = getStoredResumeTarget(id, 'codex');
+        if (threadId) {
+          const thread = await codexSessionService.findThreadById(threadId);
+          if (thread && thread.tokensUsed > 0) {
+            usageMetadata = {
+              source: 'codex-thread',
+              threadId,
+              totalTokens: thread.tokensUsed,
+            };
+          }
+        }
+      }
+
+      await knowledgeCaptureService.endSession(id, {
+        endedAt: Date.now(),
+        cause,
+        exitCode: typeof exitCode === 'number' ? exitCode : null,
+        signal,
+        usageMetadata,
+      });
+      await sessionDistillationService.runDistillationForSession(id).catch((error) => {
+        log.warn('ptyIpc: session distillation failed', {
+          id,
+          cause,
+          error: String(error),
+        });
+      });
+    })();
+  } else {
+    knowledgeSessionStartPromises.delete(id);
+  }
 
   // No valid exit code means the process was killed during cleanup, not a real completion
   if (typeof exitCode !== 'number') return;

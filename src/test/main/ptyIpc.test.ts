@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
+import type { Conversation } from '../../main/services/DatabaseService';
 import { makePtyId } from '../../shared/ptyId';
 
 type ExitPayload = {
@@ -58,6 +59,9 @@ const rejectKnowledgeCandidateMock = vi.fn<
 const archiveKnowledgeCandidateMock = vi.fn<
   (candidateId: string) => Promise<Record<string, unknown> | null>
 >(async () => null);
+const getConversationByIdMock = vi.fn<(conversationId: string) => Promise<Conversation | null>>(
+  async () => null
+);
 const listKnowledgeCardsMock = vi.fn<
   (filters?: Record<string, unknown>) => Promise<Array<Record<string, unknown>>>
 >(async () => []);
@@ -199,6 +203,22 @@ const getAllWindowsMock = vi.fn(() => [
   },
 ]);
 
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+async function flushMicrotasks(times = 4) {
+  for (let index = 0; index < times; index += 1) {
+    await Promise.resolve();
+  }
+}
+
 vi.mock('electron', () => {
   class MockNotification {
     static isSupported = vi.fn(() => true);
@@ -307,6 +327,7 @@ vi.mock('../../main/services/TerminalConfigParser', () => ({
 
 vi.mock('../../main/services/DatabaseService', () => ({
   databaseService: {
+    getConversationById: getConversationByIdMock,
     getKnowledgeSessionSummary: getKnowledgeSessionSummaryMock,
     listKnowledgeCandidates: listKnowledgeCandidatesMock,
     promoteKnowledgeCandidate: promoteKnowledgeCandidateMock,
@@ -539,6 +560,93 @@ describe('ptyIpc notification lifecycle', () => {
     expect(knowledgeCaptureMarkIdleMock).not.toHaveBeenCalled();
   });
 
+  it('resolves chat PTY sessions to their owning task before capture starts', async () => {
+    const { registerPtyIpc } = await import('../../main/services/ptyIpc');
+    registerPtyIpc();
+
+    getConversationByIdMock.mockResolvedValueOnce({
+      id: 'conv_chat_1',
+      taskId: 'task-owning-chat',
+      title: 'Codex Chat',
+      provider: 'codex',
+      createdAt: '2026-03-26T00:00:00.000Z',
+      updatedAt: '2026-03-26T00:00:00.000Z',
+    });
+
+    const startDirect = ipcHandleHandlers.get('pty:startDirect');
+    expect(startDirect).toBeTypeOf('function');
+
+    const id = makePtyId('codex', 'chat', 'conv_chat_1');
+    const result = await startDirect!(
+      { sender: createSender() },
+      { id, providerId: 'codex', cwd: '/tmp/task', cols: 120, rows: 32 }
+    );
+
+    expect(result?.ok).toBe(true);
+
+    await flushMicrotasks();
+
+    expect(getConversationByIdMock).toHaveBeenCalledWith('conv_chat_1');
+    expect(knowledgeCaptureStartSessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: id,
+        taskId: 'task-owning-chat',
+        provider: 'codex',
+      })
+    );
+  });
+
+  it('waits for chat task resolution before ending the captured session', async () => {
+    const { registerPtyIpc } = await import('../../main/services/ptyIpc');
+    registerPtyIpc();
+
+    const conversationLookup = createDeferred<Conversation | null>();
+    getConversationByIdMock.mockReturnValueOnce(conversationLookup.promise);
+
+    const startDirect = ipcHandleHandlers.get('pty:startDirect');
+    expect(startDirect).toBeTypeOf('function');
+
+    const id = makePtyId('codex', 'chat', 'conv_chat_race');
+    const result = await startDirect!(
+      { sender: createSender() },
+      { id, providerId: 'codex', cwd: '/tmp/task', cols: 120, rows: 32 }
+    );
+    expect(result?.ok).toBe(true);
+
+    const proc = ptys.get(id);
+    expect(proc).toBeDefined();
+
+    proc!.emitExit(0, undefined);
+    await flushMicrotasks(1);
+
+    expect(knowledgeCaptureEndSessionMock).not.toHaveBeenCalled();
+
+    conversationLookup.resolve({
+      id: 'conv_chat_race',
+      taskId: 'task-race-owner',
+      title: 'Codex Chat',
+      provider: 'codex',
+      createdAt: '2026-03-26T00:00:00.000Z',
+      updatedAt: '2026-03-26T00:00:00.000Z',
+    });
+
+    await flushMicrotasks(6);
+
+    expect(knowledgeCaptureStartSessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: id,
+        taskId: 'task-race-owner',
+      })
+    );
+    expect(knowledgeCaptureEndSessionMock).toHaveBeenCalledWith(
+      id,
+      expect.objectContaining({ cause: 'process_exit', exitCode: 0 })
+    );
+    expect(knowledgeCaptureStartSessionMock.mock.invocationCallOrder[0]).toBeLessThan(
+      knowledgeCaptureEndSessionMock.mock.invocationCallOrder[0]
+    );
+  });
+
   it('keeps replacement PTY writable after direct CLI exit triggers shell respawn', async () => {
     const { registerPtyIpc } = await import('../../main/services/ptyIpc');
     registerPtyIpc();
@@ -560,6 +668,7 @@ describe('ptyIpc notification lifecycle', () => {
     expect(directProc).toBeDefined();
 
     directProc!.emitExit(130, undefined);
+    await flushMicrotasks(6);
 
     const replacementProc = ptys.get(id);
     expect(replacementProc).toBeDefined();
@@ -609,6 +718,8 @@ describe('ptyIpc notification lifecycle', () => {
 
     proc!.emitExit(0, undefined);
 
+    await flushMicrotasks(6);
+
     expect(knowledgeCaptureEndSessionMock).toHaveBeenCalledWith(
       id,
       expect.objectContaining({ cause: 'process_exit', exitCode: 0 })
@@ -636,6 +747,7 @@ describe('ptyIpc notification lifecycle', () => {
     expect(result?.ok).toBe(true);
 
     ptyKill!({}, { id });
+    await flushMicrotasks(6);
 
     expect(knowledgeCaptureEndSessionMock).toHaveBeenCalledWith(
       id,
@@ -664,6 +776,7 @@ describe('ptyIpc notification lifecycle', () => {
     expect(result?.ok).toBe(true);
 
     expect(() => ptyKill!({}, { id })).not.toThrow();
+    await flushMicrotasks(6);
     expect(knowledgeCaptureEndSessionMock).toHaveBeenCalledWith(
       id,
       expect.objectContaining({ cause: 'manual_kill' })

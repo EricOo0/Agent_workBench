@@ -35,13 +35,14 @@ import { activityStore } from '@/lib/activityStore';
 import { agentStatusStore } from '@/lib/agentStatusStore';
 import { handleMenuUndo, handleMenuRedo } from '@/lib/menuUndoRedo';
 import { rpc } from '@/lib/rpc';
+import { getKnowledgeTaskIdFromSessionId } from '@/lib/knowledgeSessionRouting';
 import { soundPlayer } from '@/lib/soundPlayer';
 import BrowserProvider, { useBrowser } from '@/providers/BrowserProvider';
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { SettingsPageTab } from '@/components/SettingsPage';
 const PANEL_RESIZE_DRAGGING_EVENT = 'emdash:panel-resize-dragging';
 type ResizeHandleId = 'left' | 'right';
-type KnowledgeRoute = 'overview' | 'inbox' | 'library' | null;
+type KnowledgeRoute = 'overview' | 'inbox' | 'library' | 'home' | 'skills' | 'mcp' | null;
 
 const RightSidebarBridge: React.FC<{
   onCollapsedChange: (collapsed: boolean) => void;
@@ -120,20 +121,6 @@ export function Workspace() {
   const handleCloseSettingsPage = useCallback(() => setShowSettingsPage(false), []);
   const handleToggleCommandPalette = useCallback(() => setShowCommandPalette((prev) => !prev), []);
   const handleCloseCommandPalette = useCallback(() => setShowCommandPalette(false), []);
-  const handleCloseKnowledgeOverview = useCallback(() => {
-    setShowKnowledgeOverview(false);
-  }, []);
-  const handleCloseKnowledgeInbox = useCallback(() => {
-    const shouldReturnToOverview = knowledgeBackTargetRef.current === 'overview';
-    setShowKnowledgeOverview(shouldReturnToOverview);
-    setShowKnowledgeInbox(false);
-    setKnowledgeInboxSessionId(null);
-  }, []);
-  const handleCloseKnowledgeLibrary = useCallback(() => {
-    const shouldReturnToOverview = knowledgeBackTargetRef.current === 'overview';
-    setShowKnowledgeOverview(shouldReturnToOverview);
-    setShowKnowledgeLibrary(false);
-  }, []);
   const [showDiffViewer, setShowDiffViewer] = useState(false);
   const [diffViewerInitialFile, setDiffViewerInitialFile] = useState<string | null>(null);
   const [diffViewerTaskPath, setDiffViewerTaskPath] = useState<string | null>(null);
@@ -200,45 +187,127 @@ export function Workspace() {
   // --- Project management (provided by ProjectManagementProvider in App.tsx) ---
   const projectMgmt = useProjectManagementContext();
   const { showEditorMode, setShowEditorMode, setShowKanban } = projectMgmt;
+  const getCurrentKnowledgeBackTarget = useCallback((): KnowledgeRoute => {
+    if (projectMgmt.showMcpView) return 'mcp';
+    if (projectMgmt.showSkillsView) return 'skills';
+    if (projectMgmt.showHomeView) return 'home';
+    return null;
+  }, [projectMgmt.showHomeView, projectMgmt.showMcpView, projectMgmt.showSkillsView]);
+
+  const restoreKnowledgeBackTarget = useCallback(
+    (target: KnowledgeRoute) => {
+      projectMgmt.setShowHomeView(target === 'home');
+      projectMgmt.setShowSkillsView(target === 'skills');
+      projectMgmt.setShowMcpView(target === 'mcp');
+    },
+    [projectMgmt]
+  );
+  const dismissKnowledgeViews = useCallback(
+    (options?: { restoreTarget?: boolean }) => {
+      const restoreTarget = options?.restoreTarget ?? false;
+      setShowKnowledgeOverview(false);
+      setShowKnowledgeInbox(false);
+      setShowKnowledgeLibrary(false);
+      setKnowledgeInboxSessionId(null);
+      if (restoreTarget) {
+        restoreKnowledgeBackTarget(knowledgeBackTargetRef.current);
+      } else {
+        knowledgeBackTargetRef.current = null;
+      }
+    },
+    [restoreKnowledgeBackTarget]
+  );
+  const handleCloseKnowledgeOverview = useCallback(() => {
+    dismissKnowledgeViews({ restoreTarget: true });
+  }, [dismissKnowledgeViews]);
+  const handleCloseKnowledgeInbox = useCallback(() => {
+    const shouldReturnToOverview = knowledgeBackTargetRef.current === 'overview';
+    if (!shouldReturnToOverview) {
+      dismissKnowledgeViews({ restoreTarget: true });
+      return;
+    }
+    setShowKnowledgeOverview(shouldReturnToOverview);
+    setShowKnowledgeInbox(false);
+    setKnowledgeInboxSessionId(null);
+  }, [dismissKnowledgeViews]);
+  const handleCloseKnowledgeLibrary = useCallback(() => {
+    const shouldReturnToOverview = knowledgeBackTargetRef.current === 'overview';
+    if (!shouldReturnToOverview) {
+      dismissKnowledgeViews({ restoreTarget: true });
+      return;
+    }
+    setShowKnowledgeOverview(shouldReturnToOverview);
+    setShowKnowledgeLibrary(false);
+  }, [dismissKnowledgeViews]);
   const handleOpenKnowledgeInbox = useCallback(
     (sessionId?: string | null, options?: { backTarget?: KnowledgeRoute }) => {
-      knowledgeBackTargetRef.current = options?.backTarget ?? null;
+      knowledgeBackTargetRef.current = options?.backTarget ?? getCurrentKnowledgeBackTarget();
       setKnowledgeInboxSessionId(sessionId ?? null);
       setShowKnowledgeOverview(false);
       setShowKnowledgeInbox(true);
       setShowKnowledgeLibrary(false);
+      projectMgmt.setShowHomeView(false);
+      projectMgmt.setShowSkillsView(false);
+      projectMgmt.setShowMcpView(false);
       setShowKanban(false);
       setShowEditorMode(false);
       setShowDiffViewer(false);
       handleCloseSettingsPage();
       handleCloseCommandPalette();
     },
-    [handleCloseCommandPalette, handleCloseSettingsPage, setShowEditorMode, setShowKanban]
+    [
+      getCurrentKnowledgeBackTarget,
+      handleCloseCommandPalette,
+      handleCloseSettingsPage,
+      projectMgmt,
+      setShowEditorMode,
+      setShowKanban,
+    ]
   );
   const handleOpenKnowledgeLibrary = useCallback(() => {
-    knowledgeBackTargetRef.current = null;
+    knowledgeBackTargetRef.current = getCurrentKnowledgeBackTarget();
     setShowKnowledgeLibrary(true);
     setShowKnowledgeOverview(false);
     setShowKnowledgeInbox(false);
     setKnowledgeInboxSessionId(null);
+    projectMgmt.setShowHomeView(false);
+    projectMgmt.setShowSkillsView(false);
+    projectMgmt.setShowMcpView(false);
     setShowKanban(false);
     setShowEditorMode(false);
     setShowDiffViewer(false);
     handleCloseSettingsPage();
     handleCloseCommandPalette();
-  }, [handleCloseCommandPalette, handleCloseSettingsPage, setShowEditorMode, setShowKanban]);
+  }, [
+    getCurrentKnowledgeBackTarget,
+    handleCloseCommandPalette,
+    handleCloseSettingsPage,
+    projectMgmt,
+    setShowEditorMode,
+    setShowKanban,
+  ]);
   const handleOpenKnowledgeOverview = useCallback(() => {
-    knowledgeBackTargetRef.current = null;
+    knowledgeBackTargetRef.current = getCurrentKnowledgeBackTarget();
     setShowKnowledgeOverview(true);
     setShowKnowledgeInbox(false);
     setShowKnowledgeLibrary(false);
     setKnowledgeInboxSessionId(null);
+    projectMgmt.setShowHomeView(false);
+    projectMgmt.setShowSkillsView(false);
+    projectMgmt.setShowMcpView(false);
     setShowKanban(false);
     setShowEditorMode(false);
     setShowDiffViewer(false);
     handleCloseSettingsPage();
     handleCloseCommandPalette();
-  }, [handleCloseCommandPalette, handleCloseSettingsPage, setShowEditorMode, setShowKanban]);
+  }, [
+    getCurrentKnowledgeBackTarget,
+    handleCloseCommandPalette,
+    handleCloseSettingsPage,
+    projectMgmt,
+    setShowEditorMode,
+    setShowKanban,
+  ]);
 
   // Listen for native menu "Settings" click (main → renderer)
   useEffect(() => {
@@ -246,6 +315,23 @@ export function Workspace() {
       openSettingsPage();
     });
     return () => cleanup?.();
+  }, [openSettingsPage]);
+
+  useEffect(() => {
+    const handleOpenSettingsTabEvent = (event: Event) => {
+      const detail = (event as CustomEvent<{ tab?: SettingsPageTab }>).detail;
+      openSettingsPage(detail?.tab ?? 'general');
+    };
+    window.addEventListener(
+      'emdash:open-settings-tab',
+      handleOpenSettingsTabEvent as EventListener
+    );
+    return () => {
+      window.removeEventListener(
+        'emdash:open-settings-tab',
+        handleOpenSettingsTabEvent as EventListener
+      );
+    };
   }, [openSettingsPage]);
 
   useEffect(() => {
@@ -296,23 +382,15 @@ export function Workspace() {
 
   const handleToggleKanban = useCallback(() => {
     if (!projectMgmt.selectedProject) return;
-    handleCloseKnowledgeInbox();
-    handleCloseKnowledgeLibrary();
+    dismissKnowledgeViews();
     setShowEditorMode(false);
     setShowKanban((v) => !v);
-  }, [
-    handleCloseKnowledgeInbox,
-    handleCloseKnowledgeLibrary,
-    projectMgmt.selectedProject,
-    setShowEditorMode,
-    setShowKanban,
-  ]);
+  }, [dismissKnowledgeViews, projectMgmt.selectedProject, setShowEditorMode, setShowKanban]);
   const handleToggleEditor = useCallback(() => {
-    handleCloseKnowledgeInbox();
-    handleCloseKnowledgeLibrary();
+    dismissKnowledgeViews();
     setShowKanban(false);
     setShowEditorMode((v) => !v);
-  }, [handleCloseKnowledgeInbox, handleCloseKnowledgeLibrary, setShowKanban, setShowEditorMode]);
+  }, [dismissKnowledgeViews, setShowKanban, setShowEditorMode]);
   const handleCloseEditor = useCallback(() => setShowEditorMode(false), [setShowEditorMode]);
   const handleCloseKanban = useCallback(() => setShowKanban(false), [setShowKanban]);
 
@@ -321,7 +399,11 @@ export function Workspace() {
 
   const handleOpenOverviewSession = useCallback(
     (sessionId: string) => {
-      const taskId = sessionId.split(':').filter(Boolean).pop() || sessionId;
+      const taskId = getKnowledgeTaskIdFromSessionId(sessionId);
+      if (!taskId) {
+        handleOpenKnowledgeInbox(sessionId, { backTarget: 'overview' });
+        return;
+      }
       const entry = taskMgmt.allTasks.find((item) => item.task.id === taskId);
 
       if (!entry) {
@@ -352,6 +434,22 @@ export function Workspace() {
     ]
   );
 
+  const handleSidebarSelectProject = useCallback(
+    (project: import('@/types/app').Project) => {
+      dismissKnowledgeViews();
+      projectMgmt.handleSelectProject(project);
+    },
+    [dismissKnowledgeViews, projectMgmt]
+  );
+
+  const handleSidebarSelectTask = useCallback(
+    (task: import('@/types/app').Task) => {
+      dismissKnowledgeViews();
+      taskMgmt.handleSelectTask(task);
+    },
+    [dismissKnowledgeViews, taskMgmt]
+  );
+
   // Focus task when OS notification is clicked
   const notificationFocusRef = useRef({
     allTasks: taskMgmt.allTasks,
@@ -376,31 +474,21 @@ export function Workspace() {
         projectMgmt.activateProjectView(project);
       }
       setShowKnowledgeOverview(false);
-      handleCloseKnowledgeInbox();
-      handleCloseKnowledgeLibrary();
+      dismissKnowledgeViews();
       setShowKanban(false);
       setShowEditorMode(false);
       handleCloseSettingsPage();
       handleSelectTask(task);
     });
     return cleanup;
-  }, [
-    projectMgmt.activateProjectView,
-    handleCloseKnowledgeInbox,
-    handleCloseKnowledgeLibrary,
-    handleCloseSettingsPage,
-  ]);
+  }, [projectMgmt.activateProjectView, handleCloseSettingsPage, dismissKnowledgeViews]);
 
   useEffect(() => {
     if (projectMgmt.showHomeView || projectMgmt.showSkillsView || projectMgmt.showMcpView) {
-      handleCloseKnowledgeOverview();
-      handleCloseKnowledgeInbox();
-      handleCloseKnowledgeLibrary();
+      dismissKnowledgeViews();
     }
   }, [
-    handleCloseKnowledgeOverview,
-    handleCloseKnowledgeInbox,
-    handleCloseKnowledgeLibrary,
+    dismissKnowledgeViews,
     projectMgmt.showHomeView,
     projectMgmt.showMcpView,
     projectMgmt.showSkillsView,
@@ -641,6 +729,14 @@ export function Workspace() {
                       onSidebarContextChange={handleSidebarContextChange}
                       onCloseSettingsPage={handleCloseSettingsPage}
                       onOpenAccountSettings={() => openSettingsPage('account')}
+                      onSelectProjectOverride={handleSidebarSelectProject}
+                      onSelectTaskOverride={handleSidebarSelectTask}
+                      showKnowledgeOverview={showKnowledgeOverview}
+                      showKnowledgeInbox={showKnowledgeInbox}
+                      showKnowledgeLibrary={showKnowledgeLibrary}
+                      onOpenKnowledgeOverview={handleOpenKnowledgeOverview}
+                      onOpenKnowledgeInbox={() => handleOpenKnowledgeInbox(null)}
+                      onOpenKnowledgeLibrary={handleOpenKnowledgeLibrary}
                     />
                   </ResizablePanel>
                   <ResizableHandle

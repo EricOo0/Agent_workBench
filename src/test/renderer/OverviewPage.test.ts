@@ -1,9 +1,11 @@
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  deriveStats,
   OverviewPageView,
   type OverviewPageViewProps,
 } from '../../renderer/components/knowledge/OverviewPage';
+import type { KnowledgeCandidate, KnowledgeOverviewPayload } from '../../shared/knowledge/types';
 
 function renderView(props: Partial<OverviewPageViewProps> = {}) {
   return OverviewPageView({
@@ -17,8 +19,7 @@ function renderView(props: Partial<OverviewPageViewProps> = {}) {
       distilledToday: 3,
       inboxPending: 6,
       promotedCards: 4,
-      tokenInput: 12400,
-      tokenOutput: 8300,
+      tokenUsageTotal: 20700,
       agentActiveHours: 18.5,
     },
     recentSessions: [
@@ -90,10 +91,8 @@ describe('OverviewPageView', () => {
     expect(text).toContain('Distilled today');
     expect(text).toContain('Inbox pending');
     expect(text).toContain('Promoted cards');
-    expect(text).toContain('Token input');
-    expect(text).toContain('12,400');
-    expect(text).toContain('Token output');
-    expect(text).toContain('8,300');
+    expect(text).toContain('Tokens used');
+    expect(text).toContain('20,700');
     expect(text).toContain('Agent active hours');
     expect(text).toContain('18.5h');
   });
@@ -136,5 +135,84 @@ describe('OverviewPageView', () => {
     expect(onOpenInbox).toHaveBeenCalledWith(session.sessionId);
     expect(onOpenKnowledge).toHaveBeenCalledWith(session.sessionId);
     expect(onOpenSession).toHaveBeenCalledWith(session.sessionId);
+  });
+
+  it('renders N/A when token metrics are unavailable', () => {
+    const tree = renderView({
+      stats: {
+        activeSessions: 2,
+        activeTasks: 1,
+        distilledToday: 0,
+        inboxPending: 0,
+        promotedCards: 0,
+        tokenUsageTotal: null,
+        agentActiveHours: 0,
+      },
+    });
+    const text = collectText(tree);
+
+    expect(text).toContain('Tokens used');
+    expect(text).toContain('N/A');
+  });
+
+  it('prefers aggregated active counts from live runtime rows instead of candidate inference', () => {
+    const now = Date.UTC(2026, 2, 26, 12, 0, 0);
+    const overview = {
+      overviewStats: {
+        totalSessions: 10,
+        activeSessions: 3,
+        idleSessions: 1,
+        distillingSessions: 1,
+        distilledSessions: 5,
+        failedSessions: 1,
+        lastUpdatedAt: now,
+      },
+      activeTaskCount: 2,
+      sessionSummaryCount: 10,
+      candidateCount: 1,
+      cardCount: 0,
+      candidateStatusCounts: {
+        new: 1,
+        reviewed: 0,
+        promoted: 0,
+        rejected: 0,
+        archived: 0,
+      },
+      cardStatusCounts: {
+        active: 0,
+        archived: 0,
+      },
+      distillationStatusCounts: {
+        queued: 0,
+        running: 0,
+        succeeded: 0,
+        failed: 0,
+        skipped: 0,
+      },
+      tokenUsageTotal: null,
+      agentActiveDurationMs: 0,
+      updatedAt: now,
+    } satisfies KnowledgeOverviewPayload;
+    const staleCandidate = {
+      id: 'candidate-1',
+      sessionId: 'codex-main-task-stale',
+      title: 'Old session',
+      summary: 'Old candidate should not drive active counts.',
+      sourceCount: 1,
+      status: 'new',
+      evidenceRefs: [],
+      reviewedAt: null,
+      reviewedBy: null,
+      promotedCardId: null,
+      archivedAt: null,
+      distillation: null,
+      createdAt: now - 10 * 24 * 60 * 60 * 1000,
+      updatedAt: now - 10 * 24 * 60 * 60 * 1000,
+    } satisfies KnowledgeCandidate;
+
+    const stats = deriveStats(overview, [staleCandidate], '7d', now);
+
+    expect(stats.activeSessions).toBe(3);
+    expect(stats.activeTasks).toBe(2);
   });
 });

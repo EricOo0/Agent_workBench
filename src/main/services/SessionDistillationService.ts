@@ -1,4 +1,7 @@
 import { spawn } from 'child_process';
+import { promises as fs } from 'fs';
+import os from 'os';
+import path from 'path';
 import { getProvider, type ProviderId } from '../../shared/providers/registry';
 import type {
   Conversation,
@@ -14,8 +17,10 @@ import type { TerminalSnapshotPayload } from '../types/terminalSnapshot';
 import type { KnowledgeEvidenceRef } from '../../shared/knowledge/types';
 import { stripAnsi } from '@shared/text/stripAnsi';
 import { log } from '../lib/logger';
+import { getAppSettings } from '../settings';
+import { DEFAULT_KNOWLEDGE_DISTILLATION_PROMPT } from '../../shared/knowledge/distillationPrompt';
 
-const DISTILLATION_PROMPT_VERSION = 'session-distillation.v1';
+const DISTILLATION_PROMPT_VERSION = 'session-distillation.v2';
 const DISTILLATION_TIMEOUT_MS = 60_000;
 const MAX_SNAPSHOT_CHARS = 12_000;
 const MAX_MESSAGE_CHARS = 1_500;
@@ -174,6 +179,8 @@ export class SessionDistillationService {
   }
 
   private buildPrompt(source: DistillationSource): string {
+    const distillationPrompt =
+      getAppSettings().knowledge?.distillationPrompt || DEFAULT_KNOWLEDGE_DISTILLATION_PROMPT;
     const snapshotText = source.snapshot?.data
       ? truncate(source.snapshot.data, MAX_SNAPSHOT_CHARS)
       : 'Snapshot unavailable.';
@@ -192,7 +199,6 @@ export class SessionDistillationService {
       .join('\n\n');
 
     return [
-      `You are distilling a completed coding-agent session into durable knowledge.`,
       `Prompt version: ${DISTILLATION_PROMPT_VERSION}`,
       `Task: ${source.task.name} (task_id=${source.task.id})`,
       `Session: ${source.session.sessionId}`,
@@ -206,23 +212,7 @@ export class SessionDistillationService {
       'Conversation excerpts:',
       conversationText || 'No conversation messages captured.',
       '',
-      'Return ONLY valid JSON with this shape:',
-      '{',
-      '  "summary_markdown": "markdown summary",',
-      '  "final_conclusion": "one-sentence conclusion",',
-      '  "evidence_refs": [{"id":"...","kind":"session|conversation|message|task","title":"optional"}],',
-      '  "candidates": [',
-      '    {',
-      '      "title": "candidate title",',
-      '      "card_kind": "implementation|decision|debugging|workflow|note",',
-      '      "summary": "short summary",',
-      '      "body_markdown": "optional markdown body",',
-      '      "confidence": 0.0,',
-      '      "tags": ["optional"],',
-      '      "evidence_refs": [{"id":"...","kind":"message"}]',
-      '    }',
-      '  ]',
-      '}',
+      distillationPrompt,
     ].join('\n');
   }
 
@@ -436,10 +426,19 @@ class CliDistillationRunner implements DistillationRunner {
 
     const command = provider.cli;
     const cliArgs: string[] = [];
+    let outputFilePath: string | null = null;
 
     if (providerId === 'claude') {
       cliArgs.push('-p', args.prompt, '--output-format', 'json');
       if (provider.autoApproveFlag) cliArgs.push(provider.autoApproveFlag);
+    } else if (providerId === 'codex') {
+      outputFilePath = path.join(
+        os.tmpdir(),
+        `emdash-distillation-${Date.now()}-${Math.random().toString(36).slice(2, 10)}.txt`
+      );
+      cliArgs.push('exec', '--skip-git-repo-check');
+      if (provider.autoApproveFlag) cliArgs.push(provider.autoApproveFlag);
+      cliArgs.push('-o', outputFilePath, args.prompt);
     } else {
       if (provider.defaultArgs?.length) cliArgs.push(...provider.defaultArgs);
       if (provider.autoApproveFlag) cliArgs.push(provider.autoApproveFlag);
@@ -504,7 +503,24 @@ class CliDistillationRunner implements DistillationRunner {
           done(new Error(stderr.trim() || `Distillation provider exited with code ${code}`));
           return;
         }
-        done(null, stdout);
+        if (!outputFilePath) {
+          done(null, stdout);
+          return;
+        }
+
+        void fs
+          .readFile(outputFilePath, 'utf8')
+          .then((fileOutput) => {
+            done(null, fileOutput || stdout);
+          })
+          .catch(() => {
+            done(null, stdout);
+          })
+          .finally(async () => {
+            try {
+              await fs.unlink(outputFilePath!);
+            } catch {}
+          });
       });
     });
   }

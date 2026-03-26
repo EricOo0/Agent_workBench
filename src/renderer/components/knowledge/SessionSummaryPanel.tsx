@@ -85,6 +85,20 @@ function getPreview(summary: KnowledgeSessionSummary | null): string | null {
   return null;
 }
 
+function truncate(value: string, maxChars: number): string {
+  if (value.length <= maxChars) return value;
+  return `${value.slice(0, maxChars)}...`;
+}
+
+function openKnowledgePromptSettings() {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(
+    new CustomEvent('emdash:open-settings-tab', {
+      detail: { tab: 'clis-models' },
+    })
+  );
+}
+
 export const SessionSummaryPanel: React.FC<Props> = ({
   loading,
   summary,
@@ -102,6 +116,18 @@ export const SessionSummaryPanel: React.FC<Props> = ({
       null
   );
   const candidateCount = summary?.candidate?.sourceCount ?? 0;
+  const distillationDetails = summary?.distillation;
+  const failedDetails =
+    !loading && state.label === 'Failed' && distillationDetails
+      ? {
+          provider: distillationDetails.provider ?? 'Unknown',
+          promptVersion: distillationDetails.promptVersion ?? 'Unknown',
+          errorMessage: distillationDetails.errorMessage ?? error ?? 'Unknown failure',
+          rawResponse: distillationDetails.rawResponse
+            ? truncate(distillationDetails.rawResponse, 600)
+            : null,
+        }
+      : null;
 
   return (
     <section
@@ -160,10 +186,45 @@ export const SessionSummaryPanel: React.FC<Props> = ({
           ) : (
             <p className="text-sm text-muted-foreground">{state.detail}</p>
           )}
+
+          {failedDetails ? (
+            <details className="rounded-md border border-rose-200/80 bg-rose-50/70 p-2.5 text-sm text-rose-900">
+              <summary className="cursor-pointer list-none font-medium">Failure details</summary>
+              <div className="mt-2 space-y-2">
+                <div className="grid gap-1 text-xs text-rose-900/80 sm:grid-cols-2">
+                  <span>Provider: {failedDetails.provider}</span>
+                  <span>Prompt: {failedDetails.promptVersion}</span>
+                </div>
+                <div>
+                  <p className="text-xs font-medium uppercase tracking-[0.14em] text-rose-900/70">
+                    Error
+                  </p>
+                  <p className="mt-1 whitespace-pre-wrap break-words text-sm">
+                    {failedDetails.errorMessage}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs font-medium uppercase tracking-[0.14em] text-rose-900/70">
+                    Raw output
+                  </p>
+                  <pre className="mt-1 max-h-40 overflow-auto rounded-md border border-rose-200/80 bg-background/80 p-2 text-xs text-foreground">
+                    {failedDetails.rawResponse ?? 'No raw response captured.'}
+                  </pre>
+                </div>
+              </div>
+            </details>
+          ) : null}
         </div>
 
-        {(onRetry || onOpenInbox) && !loading ? (
+        {!loading ? (
           <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={openKnowledgePromptSettings}
+              className="inline-flex h-8 items-center rounded-md border border-border bg-background px-2.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+            >
+              Edit prompt
+            </button>
             {onRetry ? (
               <button
                 type="button"

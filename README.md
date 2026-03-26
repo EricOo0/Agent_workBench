@@ -6,10 +6,10 @@
 <br />
 
 [![MIT License](https://img.shields.io/badge/License-MIT-555555.svg?labelColor=333333&color=666666)](./LICENSE.md)
-[![Downloads](https://img.shields.io/github/downloads/generalaction/emdash/total?labelColor=333333&color=666666)](https://github.com/generalaction/emdash/releases)
-[![GitHub Stars](https://img.shields.io/github/stars/generalaction/emdash?labelColor=333333&color=666666)](https://github.com/generalaction/emdash)
-[![Last Commit](https://img.shields.io/github/last-commit/generalaction/emdash?labelColor=333333&color=666666)](https://github.com/generalaction/emdash/commits/main)
-[![Commit Activity](https://img.shields.io/github/commit-activity/m/generalaction/emdash?labelColor=333333&color=666666)](https://github.com/generalaction/emdash/graphs/commit-activity)
+[![Downloads](https://img.shields.io/github/downloads/EricOo0/Agent_workBench/total?labelColor=333333&color=666666)](https://github.com/EricOo0/Agent_workBench/releases)
+[![GitHub Stars](https://img.shields.io/github/stars/EricOo0/Agent_workBench?labelColor=333333&color=666666)](https://github.com/EricOo0/Agent_workBench)
+[![Last Commit](https://img.shields.io/github/last-commit/EricOo0/Agent_workBench?labelColor=333333&color=666666)](https://github.com/EricOo0/Agent_workBench/commits/main)
+[![Commit Activity](https://img.shields.io/github/commit-activity/m/EricOo0/Agent_workBench?labelColor=333333&color=666666)](https://github.com/EricOo0/Agent_workBench/graphs/commit-activity)
 <br>
 [![Discord](https://img.shields.io/badge/Discord-join-%235462eb?labelColor=%235462eb&logo=discord&logoColor=%23f5f5f5)](https://discord.gg/f2fv7YxuR2)
 <a href="https://www.ycombinator.com"><img src="https://img.shields.io/badge/Y%20Combinator-W26-orange" alt="Y Combinator W26"></a>
@@ -31,17 +31,38 @@
 
 <br />
 
-Emdash is a provider-agnostic desktop app that lets you run multiple coding agents in parallel, each isolated in its own git worktree, either locally or over SSH on a remote machine. We call it an Agentic Development Environment (ADE).
+Agent WorkBench is a desktop Agentic Development Environment focused on turning coding sessions into reusable engineering knowledge. It keeps the upstream multi-agent, multi-worktree workflow from Emdash, and adds a knowledge workbench layer on top so useful results do not disappear when a terminal session ends.
 
-Emdash supports 23 CLI agents, including Claude Code, Qwen Code, Hermes Agent, Amp, and Codex. Users can directly pass Linear, GitHub, or Jira tickets to an agent, review diffs, test changes, create PRs, see CI/CD checks, and merge. 
+This project is forked from [generalaction/emdash](https://github.com/generalaction/emdash). The fork keeps the original provider-agnostic ADE foundation and extends it with session summary distillation, knowledge candidate review, and knowledge reuse workflows tailored for long-running engineering work.
+
+Agent WorkBench supports the same upstream multi-agent terminal workflow: you can run multiple coding agents in parallel, isolate them in git worktrees, connect to remote machines over SSH, pass tickets into agents, review diffs, test changes, create PRs, and inspect CI/CD status.
+
+## Why This Fork
+
+This fork is opinionated about one thing: coding-agent output should become durable team knowledge instead of transient terminal history.
+
+### Highlights
+
+- **Session summary distillation**
+  When a provider session exits, WorkBench can distill the session into a structured summary instead of leaving the outcome buried in terminal scrollback.
+- **Inbox review for candidate knowledge**
+  A single session can produce zero to multiple candidate knowledge cards. Low-value noise is filtered out, and higher-signal takeaways are reviewed in an Inbox before promotion.
+- **Knowledge library**
+  Promoted cards become a searchable library of reusable implementation patterns, debugging lessons, workflow guidance, and architectural decisions.
+- **Overview for activity and knowledge output**
+  Overview surfaces active sessions, active tasks, distillation output, promoted cards, and usage metrics to help track whether the workbench is producing useful knowledge.
+- **Editable distillation prompt**
+  The summary extraction prompt is configurable from the app, so teams can tune what “valuable knowledge” means for their own engineering context.
+- **Preserves the upstream ADE strengths**
+  The fork still keeps Emdash’s core strengths: provider-agnostic CLI support, parallel agent workflows, git worktree isolation, diff review, PR creation, and SSH-based remote development.
 
 **Develop on remote servers via SSH**
 
-Connect to remote machines via SSH/SFTP to work with remote codebases. Emdash supports SSH agent and key authentication, with secure credential storage in your OS keychain. Run agents on remote projects using the same parallel workflow as local development. [Learn more](https://www.emdash.sh/cloud)
+Connect to remote machines via SSH/SFTP to work with remote codebases. Agent WorkBench supports SSH agent and key authentication, with secure credential storage in your OS keychain. Run agents on remote projects using the same parallel workflow as local development.
 
 <div align="center" style="margin:24px 0;">
 
-[Installation](#installation) • [Providers](#providers) • [Contributing](#contributing) • [FAQ](#faq)
+[Why This Fork](#why-this-fork) • [Installation](#installation) • [Providers](#providers) • [Contributing](#contributing) • [FAQ](#faq)
 
 </div>
 

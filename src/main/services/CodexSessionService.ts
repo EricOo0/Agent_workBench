@@ -9,6 +9,7 @@ export type CodexThread = {
   createdAt: number;
   updatedAt: number;
   archived: boolean;
+  tokensUsed: number;
 };
 
 let codexStatePathOverride: string | null = null;
@@ -108,13 +109,14 @@ class CodexSessionService {
       createdAt: Number(row.created_at ?? 0),
       updatedAt: Number(row.updated_at ?? 0),
       archived: Boolean(row.archived ?? 0),
+      tokensUsed: Number(row.tokens_used ?? 0),
     };
   }
 
   async findThreadById(threadId: string): Promise<CodexThread | null> {
     try {
       const row = await this.get<Record<string, unknown>>(
-        'SELECT id, cwd, created_at, updated_at, archived FROM threads WHERE id = ? LIMIT 1',
+        'SELECT id, cwd, created_at, updated_at, archived, tokens_used FROM threads WHERE id = ? LIMIT 1',
         [threadId]
       );
       return this.mapThreadRow(row);
@@ -137,6 +139,7 @@ class CodexSessionService {
     try {
       const rows = await this.all<Record<string, unknown>>(
         `SELECT id, cwd, created_at, updated_at, archived
+                , tokens_used
          FROM threads
          WHERE cwd = ?
            AND archived = 0
@@ -161,6 +164,7 @@ class CodexSessionService {
     try {
       const row = await this.get<Record<string, unknown>>(
         `SELECT id, cwd, created_at, updated_at, archived
+                , tokens_used
          FROM threads
          WHERE cwd = ?
          ORDER BY updated_at DESC, created_at DESC

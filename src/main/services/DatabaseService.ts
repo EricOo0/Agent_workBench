@@ -1,6 +1,7 @@
 import type sqlite3Type from 'sqlite3';
 import { and, asc, desc, eq, inArray, isNull, like, or, sql } from 'drizzle-orm';
 import { readMigrationFiles } from 'drizzle-orm/migrator';
+import { parsePtyId } from '../../shared/ptyId';
 import { resolveDatabasePath, resolveMigrationsPath } from '../db/path';
 import { getDrizzleClient } from '../db/drizzleClient';
 import { errorTracking } from '../errorTracking';
@@ -248,6 +249,7 @@ export class ProjectConflictError extends Error {
 }
 
 export class DatabaseService {
+  private static readonly ACTIVE_RUNTIME_FRESHNESS_MS = 6 * 60 * 60 * 1000;
   private static migrationsApplied = false;
   private db: sqlite3Type.Database | null = null;
   private sqlite3: typeof sqlite3Type | null = null;
@@ -616,6 +618,18 @@ export class DatabaseService {
     return rows.map((row) => this.mapDrizzleConversationRow(row));
   }
 
+  async getConversationById(conversationId: string): Promise<Conversation | null> {
+    if (this.disabled) return null;
+    if (!conversationId) return null;
+    const { db } = await getDrizzleClient();
+    const rows = await db
+      .select()
+      .from(conversationsTable)
+      .where(eq(conversationsTable.id, conversationId))
+      .limit(1);
+    return rows[0] ? this.mapDrizzleConversationRow(rows[0]) : null;
+  }
+
   async getOrCreateDefaultConversation(taskId: string, provider?: string): Promise<Conversation> {
     if (this.disabled) {
       return {
@@ -960,7 +974,10 @@ export class DatabaseService {
     const existing = existingRows[0];
 
     if (existing) {
-      if (existing.taskId !== stats.taskId) {
+      if (
+        existing.taskId !== stats.taskId &&
+        !this.isLegacyChatRuntimeTaskScopeMismatch(existing.taskId, stats)
+      ) {
         throw new Error(
           `Session runtime stats scope mismatch for session ${stats.sessionId}: expected task ${existing.taskId}, received ${stats.taskId}`
         );
@@ -968,6 +985,7 @@ export class DatabaseService {
       const rows = await db
         .update(sessionRuntimeStatsTable)
         .set({
+          taskId: values.taskId,
           provider: values.provider,
           status: values.status,
           startedAt: values.startedAt,
@@ -1324,6 +1342,7 @@ export class DatabaseService {
           failedSessions: 0,
           lastUpdatedAt: now,
         },
+        activeTaskCount: 0,
         sessionSummaryCount: 0,
         candidateCount: 0,
         cardCount: 0,
@@ -1345,6 +1364,10 @@ export class DatabaseService {
           failed: 0,
           skipped: 0,
         },
+        tokenInput: null,
+        tokenOutput: null,
+        tokenUsageTotal: null,
+        agentActiveDurationMs: null,
         updatedAt: now,
       };
     }
@@ -1421,19 +1444,40 @@ export class DatabaseService {
       (max, row) => Math.max(max, row.updatedAt),
       0
     );
+    const activeRuntimeRows = runtimeRowsInOverview.filter(
+      (row) =>
+        row.endedAt === null &&
+        ['active', 'idle', 'distilling'].includes(row.status) &&
+        now - row.updatedAt <= DatabaseService.ACTIVE_RUNTIME_FRESHNESS_MS
+    );
+    const activeTaskCount = new Set(activeRuntimeRows.map((row) => row.taskId)).size;
+    const tokenInput = runtimeRowsInOverview.reduce((sum, row) => sum + (row.inputTokens ?? 0), 0);
+    const tokenOutput = runtimeRowsInOverview.reduce(
+      (sum, row) => sum + (row.outputTokens ?? 0),
+      0
+    );
+    const tokenUsageTotal = runtimeRowsInOverview.reduce((sum, row) => {
+      const usage = this.parseJson<Record<string, unknown> | null>(row.usageMetadataJson, null);
+      const totalTokens = typeof usage?.totalTokens === 'number' ? usage.totalTokens : 0;
+      return sum + totalTokens;
+    }, 0);
+    const agentActiveDurationMs = runtimeRowsInOverview.reduce(
+      (sum, row) => sum + (row.activeDurationMs ?? 0),
+      0
+    );
 
     return {
       overviewStats: {
         totalSessions: runtimeRowsInOverview.length,
-        activeSessions: runtimeRowsInOverview.filter((row) => row.status === 'active').length,
-        idleSessions: runtimeRowsInOverview.filter((row) => row.status === 'idle').length,
-        distillingSessions: runtimeRowsInOverview.filter((row) => row.status === 'distilling')
-          .length,
+        activeSessions: activeRuntimeRows.length,
+        idleSessions: activeRuntimeRows.filter((row) => row.status === 'idle').length,
+        distillingSessions: activeRuntimeRows.filter((row) => row.status === 'distilling').length,
         distilledSessions: runtimeRowsInOverview.filter((row) => row.status === 'distilled').length,
         failedSessions: runtimeRowsInOverview.filter((row) => row.status === 'distill_failed')
           .length,
         lastUpdatedAt: lastUpdatedAt || now,
       },
+      activeTaskCount,
       sessionSummaryCount: runtimeRowsInOverview.length,
       candidateCount: candidateRowsInOverview.length,
       cardCount: cardRowsInOverview.length,
@@ -1465,6 +1509,10 @@ export class DatabaseService {
         skipped: distillationRowsInOverview.filter((row) => row.distillation.status === 'skipped')
           .length,
       },
+      tokenUsageTotal: tokenUsageTotal > 0 ? tokenUsageTotal : null,
+      tokenInput,
+      tokenOutput,
+      agentActiveDurationMs,
       updatedAt: lastUpdatedAt || now,
     };
   }
@@ -1710,6 +1758,18 @@ export class DatabaseService {
       .where(eq(knowledgeCandidatesTable.id, candidateId))
       .limit(1);
     return rows[0] ? this.mapKnowledgeCandidateRow(rows[0]) : null;
+  }
+
+  private isLegacyChatRuntimeTaskScopeMismatch(
+    existingTaskId: string,
+    stats: SessionRuntimeStatsRecord
+  ): boolean {
+    const parsed = parsePtyId(stats.sessionId);
+    if (!parsed || parsed.kind !== 'chat') {
+      return false;
+    }
+
+    return existingTaskId === parsed.suffix;
   }
 
   private assertTaskSessionScopeMatches(args: {
@@ -2133,6 +2193,16 @@ export class DatabaseService {
         appliedCount += 1;
       }
 
+      const standaloneMigrations = await this.loadStandaloneSqlMigrations(migrationsPath, applied);
+      for (const migration of standaloneMigrations) {
+        await this.execSql(migration.contents);
+        await this.execSql(
+          `INSERT INTO "__drizzle_migrations" ("hash", "created_at") VALUES('${migration.hash}', '${migration.createdAt}')`
+        );
+        applied.add(migration.hash);
+        appliedCount += 1;
+      }
+
       this.lastMigrationSummary = {
         appliedCount,
         totalMigrations: migrations.length,
@@ -2259,6 +2329,46 @@ export class DatabaseService {
       `INSERT INTO "__drizzle_migrations" ("hash", "created_at") VALUES('${hash}', '${createdAt}')`
     );
     applied.add(hash);
+  }
+
+  private async loadStandaloneSqlMigrations(
+    migrationsFolder: string,
+    applied: Set<string>
+  ): Promise<Array<{ hash: string; createdAt: number; contents: string }>> {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const fs = require('node:fs');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const path = require('node:path');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const crypto = require('node:crypto');
+
+    const tagByWhen = await this.tryLoadMigrationTagByWhen(migrationsFolder);
+    const journalTags = new Set(Array.from(tagByWhen?.values() ?? []));
+
+    const entries = fs
+      .readdirSync(migrationsFolder, { withFileTypes: true })
+      .filter((entry: { isFile: () => boolean; name: string }) => entry.isFile())
+      .map((entry: { name: string }) => entry.name)
+      .filter((name: string) => /^\d+_.*\.sql$/.test(name))
+      .filter((name: string) => !journalTags.has(name.replace(/\.sql$/, '')))
+      .sort((a: string, b: string) => a.localeCompare(b));
+
+    const pending: Array<{ hash: string; createdAt: number; contents: string }> = [];
+    for (const name of entries) {
+      const fullPath = path.join(migrationsFolder, name);
+      const contents = fs.readFileSync(fullPath, 'utf8');
+      const hash = crypto.createHash('sha256').update(contents).digest('hex');
+      if (applied.has(hash)) continue;
+
+      const prefix = Number.parseInt(name.split('_', 1)[0] ?? '', 10);
+      pending.push({
+        hash,
+        createdAt: Number.isFinite(prefix) ? prefix : Date.now(),
+        contents,
+      });
+    }
+
+    return pending;
   }
 
   private async tableExists(name: string): Promise<boolean> {

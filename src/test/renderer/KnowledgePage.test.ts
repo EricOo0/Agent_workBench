@@ -193,6 +193,25 @@ describe('KnowledgePageView', () => {
 
     expect(onOpenSourceSession).toHaveBeenCalledWith('pty:codex:main:task-1');
   });
+
+  it('keeps the card list column scrollable within the split layout', () => {
+    const tree = renderView();
+    const scrollableColumns = findElements(
+      tree,
+      (element) =>
+        typeof element.props.className === 'string' &&
+        element.props.className.includes('min-h-0 flex-1 overflow-y-auto p-2')
+    );
+    const listColumnWrappers = findElements(
+      tree,
+      (element) =>
+        typeof element.props.className === 'string' &&
+        element.props.className.includes('min-h-0 border-b border-border')
+    );
+
+    expect(scrollableColumns.length).toBeGreaterThan(0);
+    expect(listColumnWrappers.length).toBeGreaterThan(0);
+  });
 });
 
 describe('applyKnowledgeCardFilters', () => {

@@ -169,4 +169,23 @@ describe('InboxPageView', () => {
 
     expect(onRetryCandidate).toHaveBeenCalledWith(selectedCandidate);
   });
+
+  it('keeps the candidate list column scrollable within the split layout', () => {
+    const tree = renderView();
+    const listColumnWrappers = findElements(
+      tree,
+      (element) =>
+        typeof element.props.className === 'string' &&
+        element.props.className.includes('min-h-0 border-b border-border')
+    );
+    const scrollableColumns = findElements(
+      tree,
+      (element) =>
+        typeof element.props.className === 'string' &&
+        element.props.className.includes('min-h-0 flex-1 overflow-y-auto p-2')
+    );
+
+    expect(listColumnWrappers.length).toBeGreaterThan(0);
+    expect(scrollableColumns.length).toBeGreaterThan(0);
+  });
 });
