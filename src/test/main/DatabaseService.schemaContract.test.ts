@@ -35,7 +35,11 @@ describe('DatabaseService schema contract', () => {
       const [tableName, columnName] = args as [string, string];
       return (
         (tableName === 'projects' && columnName === 'base_ref') ||
-        (tableName === 'conversations' && columnName === 'task_id')
+        (tableName === 'conversations' && columnName === 'task_id') ||
+        (tableName === 'session_runtime_stats' && columnName === 'session_id') ||
+        (tableName === 'session_distillations' && columnName === 'status') ||
+        (tableName === 'knowledge_candidates' && columnName === 'card_kind') ||
+        (tableName === 'knowledge_cards' && columnName === 'status')
       );
     });
 
@@ -53,14 +57,26 @@ describe('DatabaseService schema contract', () => {
       name: 'DatabaseSchemaMismatchError',
       code: 'DB_SCHEMA_MISMATCH',
       dbPath: '/tmp/emdash-schema-contract-test.db',
-      missingInvariants: ['projects.base_ref'],
+      missingInvariants: [
+        'projects.base_ref',
+        'session_runtime_stats.session_id',
+        'session_distillations.status',
+        'knowledge_candidates.card_kind',
+        'knowledge_cards.status',
+      ],
     });
   });
 
   it('collects multiple missing invariants', async () => {
     vi.spyOn(service as any, 'tableExists').mockImplementation(async (...args: unknown[]) => {
       const [tableName] = args as [string];
-      return tableName !== 'tasks';
+      return ![
+        'tasks',
+        'session_runtime_stats',
+        'session_distillations',
+        'knowledge_candidates',
+        'knowledge_cards',
+      ].includes(tableName);
     });
     vi.spyOn(service as any, 'tableHasColumn').mockResolvedValue(false);
 
@@ -73,6 +89,14 @@ describe('DatabaseService schema contract', () => {
         'projects.base_ref',
         'tasks table',
         'conversations.task_id',
+        'session_runtime_stats table',
+        'session_runtime_stats.session_id',
+        'session_distillations table',
+        'session_distillations.status',
+        'knowledge_candidates table',
+        'knowledge_candidates.card_kind',
+        'knowledge_cards table',
+        'knowledge_cards.status',
       ]);
     }
   });
