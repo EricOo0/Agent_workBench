@@ -36,6 +36,11 @@ const markCodexSessionBoundMock = vi.fn();
 const codexThreadExistsForCwdMock = vi.fn(async () => true);
 const codexFindLatestRecentThreadForCwdMock = vi.fn(async () => null);
 const codexFindLatestThreadForCwdMock = vi.fn(async () => null);
+const knowledgeCaptureStartSessionMock = vi.fn(async () => undefined);
+const knowledgeCaptureMarkActivityMock = vi.fn(async () => undefined);
+const knowledgeCaptureMarkIdleMock = vi.fn(async () => undefined);
+const knowledgeCaptureEndSessionMock = vi.fn(async () => undefined);
+const knowledgeCaptureGetSessionStateMock = vi.fn(() => null);
 const execFileMock = vi.fn(
   (
     _cmd: string,
@@ -252,6 +257,17 @@ vi.mock('../../main/services/ClaudeConfigService', () => ({
   maybeAutoTrustForClaude: vi.fn(),
 }));
 
+vi.mock('../../main/services/KnowledgeCaptureService', () => ({
+  knowledgeCaptureService: {
+    startSession: knowledgeCaptureStartSessionMock,
+    markActivity: knowledgeCaptureMarkActivityMock,
+    markIdle: knowledgeCaptureMarkIdleMock,
+    endSession: knowledgeCaptureEndSessionMock,
+    getSessionState: knowledgeCaptureGetSessionStateMock,
+    getState: knowledgeCaptureGetSessionStateMock,
+  },
+}));
+
 vi.mock('../../main/services/AgentEventService', () => ({
   agentEventService: {
     getPort: agentEventGetPortMock,
@@ -322,6 +338,7 @@ describe('ptyIpc notification lifecycle', () => {
     codexThreadExistsForCwdMock.mockResolvedValue(true);
     codexFindLatestRecentThreadForCwdMock.mockResolvedValue(null);
     codexFindLatestThreadForCwdMock.mockResolvedValue(null);
+    knowledgeCaptureGetSessionStateMock.mockReturnValue(null);
     vi.useFakeTimers();
   });
 
@@ -427,6 +444,31 @@ describe('ptyIpc notification lifecycle', () => {
     expect(notificationShow).not.toHaveBeenCalled();
   });
 
+  it('starts capture state when a provider CLI launches', async () => {
+    const { registerPtyIpc } = await import('../../main/services/ptyIpc');
+    registerPtyIpc();
+
+    const startDirect = ipcHandleHandlers.get('pty:startDirect');
+    expect(startDirect).toBeTypeOf('function');
+
+    const id = makePtyId('codex', 'main', 'task-capture-start');
+    const result = await startDirect!(
+      { sender: createSender() },
+      { id, providerId: 'codex', cwd: '/tmp/task', cols: 120, rows: 32 }
+    );
+
+    expect(result?.ok).toBe(true);
+    expect(knowledgeCaptureStartSessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: id,
+        taskId: 'task-capture-start',
+        provider: 'codex',
+        startedAt: expect.any(Number),
+      })
+    );
+    expect(knowledgeCaptureMarkIdleMock).not.toHaveBeenCalled();
+  });
+
   it('keeps replacement PTY writable after direct CLI exit triggers shell respawn', async () => {
     const { registerPtyIpc } = await import('../../main/services/ptyIpc');
     registerPtyIpc();
@@ -457,9 +499,43 @@ describe('ptyIpc notification lifecycle', () => {
       'agent_run_finish',
       expect.objectContaining({ provider: 'codex' })
     );
+    expect(knowledgeCaptureEndSessionMock).toHaveBeenCalledWith(
+      id,
+      expect.objectContaining({
+        cause: 'process_exit',
+        exitCode: 130,
+      })
+    );
+    expect(knowledgeCaptureMarkIdleMock).not.toHaveBeenCalled();
 
     ptyInput!({}, { id, data: 'codex resume --last\r' });
     expect(replacementProc!.write).toHaveBeenCalledWith('codex resume --last\r');
+  });
+
+  it('ends capture state on explicit session termination', async () => {
+    const { registerPtyIpc } = await import('../../main/services/ptyIpc');
+    registerPtyIpc();
+
+    const startDirect = ipcHandleHandlers.get('pty:startDirect');
+    const ptyKill = ipcOnHandlers.get('pty:kill');
+    expect(startDirect).toBeTypeOf('function');
+    expect(ptyKill).toBeTypeOf('function');
+
+    const id = makePtyId('claude', 'main', 'task-manual-kill');
+    const result = await startDirect!(
+      { sender: createSender() },
+      { id, providerId: 'claude', cwd: '/tmp/task', cols: 120, rows: 32 }
+    );
+    expect(result?.ok).toBe(true);
+
+    ptyKill!({}, { id });
+
+    expect(knowledgeCaptureEndSessionMock).toHaveBeenCalledWith(
+      id,
+      expect.objectContaining({
+        cause: 'manual_kill',
+      })
+    );
   });
 
   it('still cleans up direct PTY exit when no replacement PTY exists', async () => {

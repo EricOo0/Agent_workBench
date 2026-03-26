@@ -34,6 +34,7 @@ import { databaseService } from './DatabaseService';
 import { lifecycleScriptsService } from './LifecycleScriptsService';
 import { taskLifecycleService } from './TaskLifecycleService';
 import { maybeAutoTrustForClaude } from './ClaudeConfigService';
+import { knowledgeCaptureService } from './KnowledgeCaptureService';
 import { OpenCodeHookService, OPEN_CODE_PLUGIN_FILE } from './OpenCodeHookService';
 import { getDrizzleClient } from '../db/drizzleClient';
 import { sshConnections as sshConnectionsTable } from '../db/schema';
@@ -1493,13 +1494,22 @@ function providerRunKey(providerId: ProviderId, taskId: string) {
 
 function maybeMarkProviderStart(id: string, providerId?: ProviderId) {
   finalizedPtys.delete(id);
+  const parsed = parseProviderPty(id);
+  const taskId = parsed?.taskId ?? id;
 
   // First check if we have a direct provider ID (for multi-agent mode)
   if (providerId && PROVIDER_IDS.includes(providerId)) {
     ptyProviderMap.set(id, providerId);
     const key = `${providerId}:${id}`;
     if (providerPtyTimers.has(key)) return;
-    providerPtyTimers.set(key, Date.now());
+    const startedAt = Date.now();
+    providerPtyTimers.set(key, startedAt);
+    void knowledgeCaptureService.startSession({
+      sessionId: id,
+      taskId,
+      provider: providerId,
+      startedAt,
+    });
     telemetry.capture('agent_run_start', { provider: providerId });
     return;
   }
@@ -1509,17 +1519,30 @@ function maybeMarkProviderStart(id: string, providerId?: ProviderId) {
   if (storedProvider) {
     const key = `${storedProvider}:${id}`;
     if (providerPtyTimers.has(key)) return;
-    providerPtyTimers.set(key, Date.now());
+    const startedAt = Date.now();
+    providerPtyTimers.set(key, startedAt);
+    void knowledgeCaptureService.startSession({
+      sessionId: id,
+      taskId,
+      provider: storedProvider,
+      startedAt,
+    });
     telemetry.capture('agent_run_start', { provider: storedProvider });
     return;
   }
 
   // Fall back to parsing the ID (single-agent mode)
-  const parsed = parseProviderPty(id);
   if (!parsed) return;
   const key = providerRunKey(parsed.providerId, parsed.taskId);
   if (providerPtyTimers.has(key)) return;
-  providerPtyTimers.set(key, Date.now());
+  const startedAt = Date.now();
+  providerPtyTimers.set(key, startedAt);
+  void knowledgeCaptureService.startSession({
+    sessionId: id,
+    taskId: parsed.taskId,
+    provider: parsed.providerId,
+    startedAt,
+  });
   telemetry.capture('agent_run_start', { provider: parsed.providerId });
 }
 
@@ -1531,6 +1554,15 @@ function maybeMarkProviderFinish(
 ) {
   if (finalizedPtys.has(id)) return;
   finalizedPtys.add(id);
+
+  if (cause === 'process_exit' || cause === 'manual_kill') {
+    void knowledgeCaptureService.endSession(id, {
+      endedAt: Date.now(),
+      cause,
+      exitCode: typeof exitCode === 'number' ? exitCode : null,
+      signal,
+    });
+  }
 
   let providerId: ProviderId | undefined;
   let key: string;
