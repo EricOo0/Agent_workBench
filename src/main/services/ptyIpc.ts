@@ -35,6 +35,7 @@ import { lifecycleScriptsService } from './LifecycleScriptsService';
 import { taskLifecycleService } from './TaskLifecycleService';
 import { maybeAutoTrustForClaude } from './ClaudeConfigService';
 import { knowledgeCaptureService } from './KnowledgeCaptureService';
+import { sessionDistillationService } from './SessionDistillationService';
 import { OpenCodeHookService, OPEN_CODE_PLUGIN_FILE } from './OpenCodeHookService';
 import { getDrizzleClient } from '../db/drizzleClient';
 import { sshConnections as sshConnectionsTable } from '../db/schema';
@@ -1561,6 +1562,13 @@ function maybeMarkProviderFinish(
       cause,
       exitCode: typeof exitCode === 'number' ? exitCode : null,
       signal,
+    });
+    void sessionDistillationService.runDistillationForSession(id).catch((error) => {
+      log.warn('ptyIpc: session distillation failed', {
+        id,
+        cause,
+        error: String(error),
+      });
     });
   }
 

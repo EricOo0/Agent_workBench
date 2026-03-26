@@ -99,6 +99,13 @@ export interface Message {
   metadata?: string; // JSON string for additional data
 }
 
+export interface SessionDistillationSourceRecord {
+  task: Task;
+  session: SessionRuntimeStatsRecord;
+  conversations: Conversation[];
+  messagesByConversationId: Record<string, Message[]>;
+}
+
 export interface MigrationSummary {
   appliedCount: number;
   totalMigrations: number;
@@ -1267,6 +1274,38 @@ export class DatabaseService {
       candidate: candidateRows[0] ? this.mapKnowledgeCandidateRow(candidateRows[0]) : null,
       card: cardRows[0] ? this.mapKnowledgeCardRow(cardRows[0]) : null,
       updatedAt: runtime.updatedAt,
+    };
+  }
+
+  async getSessionDistillationSource(
+    sessionId: string
+  ): Promise<SessionDistillationSourceRecord | null> {
+    if (this.disabled) return null;
+
+    const { db } = await getDrizzleClient();
+    const sessionRows = await db
+      .select()
+      .from(sessionRuntimeStatsTable)
+      .where(eq(sessionRuntimeStatsTable.sessionId, sessionId))
+      .limit(1);
+    const sessionRow = sessionRows[0];
+    if (!sessionRow) return null;
+
+    const session = this.mapSessionRuntimeStatsRow(sessionRow);
+    const task = await this.getTaskById(session.taskId);
+    if (!task) return null;
+
+    const conversations = await this.getConversations(task.id);
+    const messagesByConversationId: Record<string, Message[]> = {};
+    for (const conversation of conversations) {
+      messagesByConversationId[conversation.id] = await this.getMessages(conversation.id);
+    }
+
+    return {
+      task,
+      session,
+      conversations,
+      messagesByConversationId,
     };
   }
 

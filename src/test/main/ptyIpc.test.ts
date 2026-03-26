@@ -41,6 +41,7 @@ const knowledgeCaptureMarkActivityMock = vi.fn(async () => undefined);
 const knowledgeCaptureMarkIdleMock = vi.fn(async () => undefined);
 const knowledgeCaptureEndSessionMock = vi.fn(async () => undefined);
 const knowledgeCaptureGetSessionStateMock = vi.fn(() => null);
+const sessionDistillationRunMock = vi.fn(async () => undefined);
 const execFileMock = vi.fn(
   (
     _cmd: string,
@@ -90,7 +91,6 @@ const startPtyMock = vi.fn(async ({ id }: { id: string }) => {
 const startDirectPtyMock = vi.fn(({ id, cwd }: { id: string; cwd: string }) => {
   const proc = createMockProc();
   ptys.set(id, proc);
-  // Mimic ptyManager wiring: direct CLI exit triggers shell respawn callback first.
   proc.onExit(() => {
     onDirectCliExitCallback?.(id, cwd);
   });
@@ -108,8 +108,9 @@ const buildProviderCliArgsMock = vi.fn((opts: any) => {
   const args: string[] = [];
   if (opts.resume && opts.resumeFlag) args.push(...parseShellArgsMock(opts.resumeFlag));
   if (opts.defaultArgs?.length) args.push(...opts.defaultArgs);
-  if (opts.autoApprove && opts.autoApproveFlag)
+  if (opts.autoApprove && opts.autoApproveFlag) {
     args.push(...parseShellArgsMock(opts.autoApproveFlag));
+  }
   if (
     opts.initialPromptFlag !== undefined &&
     !opts.useKeystrokeInjection &&
@@ -268,6 +269,12 @@ vi.mock('../../main/services/KnowledgeCaptureService', () => ({
   },
 }));
 
+vi.mock('../../main/services/SessionDistillationService', () => ({
+  sessionDistillationService: {
+    runDistillationForSession: sessionDistillationRunMock,
+  },
+}));
+
 vi.mock('../../main/services/AgentEventService', () => ({
   agentEventService: {
     getPort: agentEventGetPortMock,
@@ -339,6 +346,7 @@ describe('ptyIpc notification lifecycle', () => {
     codexFindLatestRecentThreadForCwdMock.mockResolvedValue(null);
     codexFindLatestThreadForCwdMock.mockResolvedValue(null);
     knowledgeCaptureGetSessionStateMock.mockReturnValue(null);
+    sessionDistillationRunMock.mockResolvedValue(undefined);
     vi.useFakeTimers();
   });
 
@@ -376,7 +384,6 @@ describe('ptyIpc notification lifecycle', () => {
     expect(beforeQuit).toBeTypeOf('function');
     beforeQuit!();
 
-    // Simulate late onExit callback firing after cleanup kill.
     proc!.emitExit(0, undefined);
 
     expect(notificationCtor).not.toHaveBeenCalled();
@@ -439,7 +446,6 @@ describe('ptyIpc notification lifecycle', () => {
 
     proc!.emitExit(0, undefined);
 
-    // OS notifications are now driven by hook events in AgentEventService, not PTY exit
     expect(notificationCtor).not.toHaveBeenCalled();
     expect(notificationShow).not.toHaveBeenCalled();
   });
@@ -491,7 +497,6 @@ describe('ptyIpc notification lifecycle', () => {
 
     directProc!.emitExit(130, undefined);
 
-    // Shell respawn replaced the old PTY record; stale cleanup must not delete it.
     const replacementProc = ptys.get(id);
     expect(replacementProc).toBeDefined();
     expect(replacementProc).not.toBe(directProc);
@@ -510,6 +515,44 @@ describe('ptyIpc notification lifecycle', () => {
 
     ptyInput!({}, { id, data: 'codex resume --last\r' });
     expect(replacementProc!.write).toHaveBeenCalledWith('codex resume --last\r');
+  });
+
+  it('triggers distillation asynchronously after strong process exit without blocking PTY cleanup', async () => {
+    let resolveDistillation!: (value?: undefined) => void;
+    sessionDistillationRunMock.mockImplementationOnce(
+      () =>
+        new Promise<undefined>((resolve) => {
+          resolveDistillation = resolve;
+        })
+    );
+
+    const { registerPtyIpc } = await import('../../main/services/ptyIpc');
+    registerPtyIpc();
+
+    const startDirect = ipcHandleHandlers.get('pty:startDirect');
+    expect(startDirect).toBeTypeOf('function');
+
+    const id = makePtyId('codex', 'main', 'task-distill-exit');
+    const sender = createSender();
+    const result = await startDirect!(
+      { sender },
+      { id, providerId: 'codex', cwd: '/tmp/task', cols: 120, rows: 32 }
+    );
+    expect(result?.ok).toBe(true);
+
+    const proc = ptys.get(id);
+    expect(proc).toBeDefined();
+
+    proc!.emitExit(0, undefined);
+
+    expect(knowledgeCaptureEndSessionMock).toHaveBeenCalledWith(
+      id,
+      expect.objectContaining({ cause: 'process_exit', exitCode: 0 })
+    );
+    expect(sessionDistillationRunMock).toHaveBeenCalledWith(id);
+    expect(ptys.get(id)).toBeDefined();
+
+    resolveDistillation();
   });
 
   it('ends capture state on explicit session termination', async () => {
@@ -538,6 +581,32 @@ describe('ptyIpc notification lifecycle', () => {
     );
   });
 
+  it('manual kill does not block session end when distillation fails', async () => {
+    sessionDistillationRunMock.mockRejectedValueOnce(new Error('distillation failed'));
+
+    const { registerPtyIpc } = await import('../../main/services/ptyIpc');
+    registerPtyIpc();
+
+    const startDirect = ipcHandleHandlers.get('pty:startDirect');
+    const ptyKill = ipcOnHandlers.get('pty:kill');
+    expect(startDirect).toBeTypeOf('function');
+    expect(ptyKill).toBeTypeOf('function');
+
+    const id = makePtyId('claude', 'main', 'task-manual-kill-failure');
+    const result = await startDirect!(
+      { sender: createSender() },
+      { id, providerId: 'claude', cwd: '/tmp/task', cols: 120, rows: 32 }
+    );
+    expect(result?.ok).toBe(true);
+
+    expect(() => ptyKill!({}, { id })).not.toThrow();
+    expect(knowledgeCaptureEndSessionMock).toHaveBeenCalledWith(
+      id,
+      expect.objectContaining({ cause: 'manual_kill' })
+    );
+    expect(sessionDistillationRunMock).toHaveBeenCalledWith(id);
+  });
+
   it('still cleans up direct PTY exit when no replacement PTY exists', async () => {
     const { registerPtyIpc } = await import('../../main/services/ptyIpc');
     registerPtyIpc();
@@ -556,7 +625,6 @@ describe('ptyIpc notification lifecycle', () => {
     const directProc = ptys.get(id);
     expect(directProc).toBeDefined();
 
-    // Simulate respawn callback unavailable/failing to replace.
     onDirectCliExitCallback = null;
     directProc!.emitExit(130, undefined);
 
@@ -778,14 +846,12 @@ describe('ptyIpc notification lifecycle', () => {
 
     expect(result?.ok).toBe(true);
 
-    // SSH args should contain reverse tunnel flag
     const sshArgs: string[] = lastSshPtyStartOpts?.sshArgs ?? [];
     const dashRIndex = sshArgs.indexOf('-R');
     expect(dashRIndex).toBeGreaterThanOrEqual(0);
     const tunnelSpec = sshArgs[dashRIndex + 1];
     expect(tunnelSpec).toMatch(/^127\.0\.0\.1:\d+:127\.0\.0\.1:12345$/);
 
-    // Init keystrokes should contain hook env var exports
     const proc = ptys.get(id);
     expect(proc).toBeDefined();
 
@@ -826,7 +892,6 @@ describe('ptyIpc notification lifecycle', () => {
     const sshArgs: string[] = lastSshPtyStartOpts?.sshArgs ?? [];
     expect(sshArgs).not.toContain('-R');
 
-    // No hook env in keystrokes
     const proc = ptys.get(id);
     expect(proc).toBeDefined();
 
@@ -906,7 +971,6 @@ describe('ptyIpc notification lifecycle', () => {
 
     expect(result?.ok).toBe(true);
 
-    // Hook config is written via ssh exec (execFile), not PTY keystrokes
     const sshExecCalls = execFileMock.mock.calls.filter(
       (c: any[]) => c[0] === 'ssh' && typeof c[1]?.[c[1].length - 1] === 'string'
     );
@@ -916,7 +980,6 @@ describe('ptyIpc notification lifecycle', () => {
     });
     expect(hookConfigCall).toBeDefined();
 
-    // PTY keystrokes should NOT contain the hook config (it went via ssh exec)
     const proc = ptys.get(id);
     expect(proc).toBeDefined();
     const written = (proc!.write as any).mock.calls.map((c: any[]) => c[0]).join('');
@@ -948,7 +1011,6 @@ describe('ptyIpc notification lifecycle', () => {
 
     expect(result?.ok).toBe(true);
 
-    // No ssh exec call for hook config
     const hookConfigCalls = execFileMock.mock.calls.filter(
       (c: any[]) =>
         c[0] === 'ssh' &&
@@ -977,15 +1039,12 @@ describe('ptyIpc notification lifecycle', () => {
       { id, providerId: 'claude', cwd: '/tmp/task', cols: 120, rows: 32 }
     );
 
-    // Setup is still pending — PTY must not be spawned yet
     expect(startDirectPtyMock).not.toHaveBeenCalled();
     expect(startPtyMock).not.toHaveBeenCalled();
 
-    // Unblock setup and wait for the handler to finish
     resolveSetup();
     await handlerPromise;
 
-    // PTY should now be spawned
     expect(startDirectPtyMock).toHaveBeenCalledOnce();
   });
 
@@ -1008,14 +1067,11 @@ describe('ptyIpc notification lifecycle', () => {
       { id, cwd: '/tmp/task', shell: 'codex', cols: 120, rows: 32 }
     );
 
-    // Setup is still pending — PTY must not be spawned yet
     expect(startPtyMock).not.toHaveBeenCalled();
 
-    // Unblock setup and wait for the handler to finish
     resolveSetup();
     await handlerPromise;
 
-    // PTY should now be spawned
     expect(startPtyMock).toHaveBeenCalledOnce();
   });
 });
