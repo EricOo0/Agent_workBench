@@ -37,10 +37,13 @@ import { useWorkspaceConnection } from '../hooks/useWorkspaceConnection';
 import { useTerminalSearch } from '../hooks/useTerminalSearch';
 import { TerminalSearchOverlay } from './TerminalSearchOverlay';
 import { getReviewConversationMetadata, parseConversationMetadata } from '@shared/reviewPreset';
+import { SessionSummaryPanel } from './knowledge/SessionSummaryPanel';
+import { knowledgeApi } from '../lib/knowledgeApi';
 import {
   getConversationTabLabel,
   planConversationTitleUpdates,
 } from '../lib/conversationTabTitles';
+import type { KnowledgeSessionSummary } from '@shared/knowledge/types';
 
 declare const window: Window & {
   electronAPI: {
@@ -164,6 +167,10 @@ const ChatInterface: React.FC<Props> = ({
   const [agent, setAgent] = useState<Agent>(initialAgent || 'claude');
   const currentAgentStatus = agentStatuses[agent];
   const [cliStartError, setCliStartError] = useState<string | null>(null);
+  const [sessionSummary, setSessionSummary] = useState<KnowledgeSessionSummary | null>(null);
+  const [sessionSummaryLoading, setSessionSummaryLoading] = useState(false);
+  const [sessionSummaryError, setSessionSummaryError] = useState<string | null>(null);
+  const sessionSummaryRequestIdRef = useRef(0);
 
   // Workspace-provisioned remote connection overrides
   const { connectionId: workspaceConnectionId, remotePath: workspaceRemotePath } =
@@ -943,6 +950,43 @@ const ChatInterface: React.FC<Props> = ({
     Boolean(agentMeta[agent]?.autoApproveFlag);
 
   const isMainConversation = activeConversationId === mainConversationId;
+  const loadSessionSummary = useCallback(async (sessionId: string) => {
+    const requestId = ++sessionSummaryRequestIdRef.current;
+    setSessionSummaryLoading(true);
+    setSessionSummaryError(null);
+    setSessionSummary(null);
+
+    try {
+      const summary = await knowledgeApi.getSessionSummary(sessionId);
+      if (requestId !== sessionSummaryRequestIdRef.current) return;
+      setSessionSummary(summary);
+    } catch (error) {
+      if (requestId !== sessionSummaryRequestIdRef.current) return;
+      setSessionSummary(null);
+      setSessionSummaryError(
+        error instanceof Error ? error.message : 'Failed to load session summary.'
+      );
+    } finally {
+      if (requestId !== sessionSummaryRequestIdRef.current) return;
+      setSessionSummaryLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadSessionSummary(terminalId);
+  }, [loadSessionSummary, terminalId]);
+
+  const handleRetrySessionSummary = useCallback(() => {
+    void loadSessionSummary(terminalId);
+  }, [loadSessionSummary, terminalId]);
+
+  const handleOpenKnowledgeInbox = useCallback(() => {
+    window.dispatchEvent(
+      new CustomEvent('emdash:open-knowledge-inbox', {
+        detail: { sessionId: terminalId, taskId: task.id },
+      })
+    );
+  }, [task.id, terminalId]);
 
   const initialInjection = useMemo(() => {
     if (!isTerminal) return null;
@@ -1241,6 +1285,13 @@ const ChatInterface: React.FC<Props> = ({
                 }
                 return null;
               })()}
+              <SessionSummaryPanel
+                loading={sessionSummaryLoading}
+                summary={sessionSummary}
+                error={sessionSummaryError}
+                onRetry={handleRetrySessionSummary}
+                onOpenInbox={handleOpenKnowledgeInbox}
+              />
             </div>
           </div>
           <div
