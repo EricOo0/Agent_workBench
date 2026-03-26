@@ -105,6 +105,8 @@ export function Workspace() {
   const [showSettingsPage, setShowSettingsPage] = useState(false);
   const [settingsPageInitialTab, setSettingsPageInitialTab] = useState<SettingsPageTab>('general');
   const [showCommandPalette, setShowCommandPalette] = useState(false);
+  const [showKnowledgeInbox, setShowKnowledgeInbox] = useState(false);
+  const [knowledgeInboxSessionId, setKnowledgeInboxSessionId] = useState<string | null>(null);
 
   const openSettingsPage = useCallback((tab: SettingsPageTab = 'general') => {
     setSettingsPageInitialTab(tab);
@@ -114,6 +116,10 @@ export function Workspace() {
   const handleCloseSettingsPage = useCallback(() => setShowSettingsPage(false), []);
   const handleToggleCommandPalette = useCallback(() => setShowCommandPalette((prev) => !prev), []);
   const handleCloseCommandPalette = useCallback(() => setShowCommandPalette(false), []);
+  const handleCloseKnowledgeInbox = useCallback(() => {
+    setShowKnowledgeInbox(false);
+    setKnowledgeInboxSessionId(null);
+  }, []);
   const [showDiffViewer, setShowDiffViewer] = useState(false);
   const [diffViewerInitialFile, setDiffViewerInitialFile] = useState<string | null>(null);
   const [diffViewerTaskPath, setDiffViewerTaskPath] = useState<string | null>(null);
@@ -180,6 +186,18 @@ export function Workspace() {
   // --- Project management (provided by ProjectManagementProvider in App.tsx) ---
   const projectMgmt = useProjectManagementContext();
   const { showEditorMode, setShowEditorMode, setShowKanban } = projectMgmt;
+  const handleOpenKnowledgeInbox = useCallback(
+    (sessionId?: string | null) => {
+      setKnowledgeInboxSessionId(sessionId ?? null);
+      setShowKnowledgeInbox(true);
+      setShowKanban(false);
+      setShowEditorMode(false);
+      setShowDiffViewer(false);
+      handleCloseSettingsPage();
+      handleCloseCommandPalette();
+    },
+    [handleCloseCommandPalette, handleCloseSettingsPage, setShowEditorMode, setShowKanban]
+  );
 
   // Listen for native menu "Settings" click (main → renderer)
   useEffect(() => {
@@ -189,15 +207,31 @@ export function Workspace() {
     return () => cleanup?.();
   }, [openSettingsPage]);
 
+  useEffect(() => {
+    const handleOpenInboxEvent = (event: Event) => {
+      const detail = (event as CustomEvent<{ sessionId?: string | null }>).detail;
+      handleOpenKnowledgeInbox(detail?.sessionId ?? null);
+    };
+    window.addEventListener('emdash:open-knowledge-inbox', handleOpenInboxEvent as EventListener);
+    return () => {
+      window.removeEventListener(
+        'emdash:open-knowledge-inbox',
+        handleOpenInboxEvent as EventListener
+      );
+    };
+  }, [handleOpenKnowledgeInbox]);
+
   const handleToggleKanban = useCallback(() => {
     if (!projectMgmt.selectedProject) return;
+    handleCloseKnowledgeInbox();
     setShowEditorMode(false);
     setShowKanban((v) => !v);
-  }, [projectMgmt.selectedProject, setShowEditorMode, setShowKanban]);
+  }, [handleCloseKnowledgeInbox, projectMgmt.selectedProject, setShowEditorMode, setShowKanban]);
   const handleToggleEditor = useCallback(() => {
+    handleCloseKnowledgeInbox();
     setShowKanban(false);
     setShowEditorMode((v) => !v);
-  }, [setShowKanban, setShowEditorMode]);
+  }, [handleCloseKnowledgeInbox, setShowKanban, setShowEditorMode]);
   const handleCloseEditor = useCallback(() => setShowEditorMode(false), [setShowEditorMode]);
   const handleCloseKanban = useCallback(() => setShowKanban(false), [setShowKanban]);
 
@@ -227,13 +261,51 @@ export function Workspace() {
       if (!selectedProject || selectedProject.id !== project.id) {
         projectMgmt.activateProjectView(project);
       }
+      handleCloseKnowledgeInbox();
       setShowKanban(false);
       setShowEditorMode(false);
       handleCloseSettingsPage();
       handleSelectTask(task);
     });
     return cleanup;
-  }, [projectMgmt.activateProjectView, handleCloseSettingsPage]);
+  }, [projectMgmt.activateProjectView, handleCloseKnowledgeInbox, handleCloseSettingsPage]);
+
+  useEffect(() => {
+    if (projectMgmt.showHomeView || projectMgmt.showSkillsView || projectMgmt.showMcpView) {
+      handleCloseKnowledgeInbox();
+    }
+  }, [
+    handleCloseKnowledgeInbox,
+    projectMgmt.showHomeView,
+    projectMgmt.showMcpView,
+    projectMgmt.showSkillsView,
+  ]);
+
+  useEffect(() => {
+    if (!showKnowledgeInbox) return;
+    if (showSettingsPage || showDiffViewer || showEditorMode || projectMgmt.showKanban) {
+      handleCloseKnowledgeInbox();
+    }
+  }, [
+    handleCloseKnowledgeInbox,
+    projectMgmt.showKanban,
+    showDiffViewer,
+    showEditorMode,
+    showKnowledgeInbox,
+    showSettingsPage,
+  ]);
+
+  const previousSelectedProjectIdRef = useRef<string | null>(
+    projectMgmt.selectedProject?.id ?? null
+  );
+  useEffect(() => {
+    const previousProjectId = previousSelectedProjectIdRef.current;
+    const nextProjectId = projectMgmt.selectedProject?.id ?? null;
+    if (showKnowledgeInbox && previousProjectId !== null && nextProjectId !== previousProjectId) {
+      handleCloseKnowledgeInbox();
+    }
+    previousSelectedProjectIdRef.current = nextProjectId;
+  }, [handleCloseKnowledgeInbox, projectMgmt.selectedProject?.id, showKnowledgeInbox]);
 
   // --- Panel layout ---
   const {
@@ -431,6 +503,9 @@ export function Workspace() {
                       ) : (
                         <MainContentArea
                           showSettingsPage={showSettingsPage}
+                          showKnowledgeInbox={showKnowledgeInbox}
+                          knowledgeInboxSessionId={knowledgeInboxSessionId}
+                          onCloseKnowledgeInbox={handleCloseKnowledgeInbox}
                           settingsPageInitialTab={settingsPageInitialTab}
                           handleCloseSettingsPage={handleCloseSettingsPage}
                         />
