@@ -7,6 +7,7 @@ import HomeView from './HomeView';
 import SkillsView from './skills/SkillsView';
 import { McpPage } from './mcp/McpPage';
 import InboxPage from './knowledge/InboxPage';
+import KnowledgePage from './knowledge/KnowledgePage';
 import { SettingsPage, type SettingsPageTab } from './SettingsPage';
 import TaskCreationLoading from './TaskCreationLoading';
 import WorkspaceProvisioningOverlay from './WorkspaceProvisioningOverlay';
@@ -18,8 +19,10 @@ import { useFeatureFlag } from '../hooks/useFeatureFlag';
 interface MainContentAreaProps {
   showSettingsPage: boolean;
   showKnowledgeInbox?: boolean;
+  showKnowledgeLibrary?: boolean;
   knowledgeInboxSessionId?: string | null;
   onCloseKnowledgeInbox?: () => void;
+  onCloseKnowledgeLibrary?: () => void;
   settingsPageInitialTab?: SettingsPageTab;
   handleCloseSettingsPage?: () => void;
 }
@@ -27,8 +30,10 @@ interface MainContentAreaProps {
 const MainContentArea: React.FC<MainContentAreaProps> = ({
   showSettingsPage,
   showKnowledgeInbox = false,
+  showKnowledgeLibrary = false,
   knowledgeInboxSessionId = null,
   onCloseKnowledgeInbox,
+  onCloseKnowledgeLibrary,
   settingsPageInitialTab,
   handleCloseSettingsPage,
 }) => {
@@ -104,6 +109,14 @@ const MainContentArea: React.FC<MainContentAreaProps> = ({
     return (
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <InboxPage initialSessionId={knowledgeInboxSessionId} onClose={onCloseKnowledgeInbox} />
+      </div>
+    );
+  }
+
+  if (showKnowledgeLibrary) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <KnowledgePage onClose={onCloseKnowledgeLibrary} />
       </div>
     );
   }
