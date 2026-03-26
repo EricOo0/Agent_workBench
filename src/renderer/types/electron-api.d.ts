@@ -10,8 +10,9 @@ import type {
   KnowledgeCandidate,
   KnowledgeInboxFilters,
   KnowledgeOverviewPayload,
+  KnowledgePromotionCardPayload,
   KnowledgeSessionSummary,
-  KnowledgeCandidateStatus,
+  ReviewKnowledgeCandidateArgs,
 } from '../../shared/knowledge/types';
 import type { ResourceMetricsSnapshot } from '../../shared/performanceTypes';
 
@@ -81,35 +82,25 @@ declare global {
       // Knowledge workbench
       getSessionSummary: (args: { sessionId: string }) => Promise<{
         success: boolean;
-        data?: KnowledgeSessionSummary;
+        data?: KnowledgeSessionSummary | null;
         error?: string;
       }>;
-      listKnowledgeCandidates: (args?: {
-        filters?: KnowledgeInboxFilters;
-      }) => Promise<{
+      listKnowledgeCandidates: (args?: { filters?: KnowledgeInboxFilters }) => Promise<{
         success: boolean;
         data?: KnowledgeCandidate[];
         error?: string;
       }>;
-      reviewKnowledgeCandidate: (args: {
-        candidateId: string;
-        status: Exclude<KnowledgeCandidateStatus, 'new'>;
-        note?: string;
-      }) => Promise<{
+      reviewKnowledgeCandidate: (args: ReviewKnowledgeCandidateArgs) => Promise<{
         success: boolean;
         data?: KnowledgeCandidate;
         error?: string;
       }>;
-      listKnowledgeCards: (args?: {
-        filters?: KnowledgeCardFilters;
-      }) => Promise<{
+      listKnowledgeCards: (args?: { filters?: KnowledgeCardFilters }) => Promise<{
         success: boolean;
         data?: KnowledgeCard[];
         error?: string;
       }>;
-      getKnowledgeOverview: (args?: {
-        filters?: KnowledgeInboxFilters;
-      }) => Promise<{
+      getKnowledgeOverview: (args?: { filters?: KnowledgeInboxFilters }) => Promise<{
         success: boolean;
         data?: KnowledgeOverviewPayload;
         error?: string;

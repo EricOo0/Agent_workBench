@@ -92,6 +92,40 @@ export interface KnowledgeCard {
   archivedAt?: number | null;
 }
 
+export interface KnowledgePromotionCardPayload {
+  id: string;
+  candidateId?: string | null;
+  taskId: string;
+  sessionId: string;
+  title: string;
+  cardKind: string;
+  summary: string;
+  content: string;
+  status?: KnowledgeCardStatus;
+  evidenceRefs?: KnowledgeEvidenceRef[];
+  tags?: string[];
+  createdAt?: number;
+  updatedAt?: number;
+  archivedAt?: number | null;
+}
+
+export type ReviewKnowledgeCandidateArgs =
+  | {
+      candidateId: string;
+      action: 'promote';
+      reviewedBy?: string | null;
+      card: KnowledgePromotionCardPayload;
+    }
+  | {
+      candidateId: string;
+      action: 'reject';
+      reviewedBy?: string | null;
+    }
+  | {
+      candidateId: string;
+      action: 'archive';
+    };
+
 export interface KnowledgeSessionSummary {
   sessionId: string;
   lifecycleState: SessionLifecycleState;

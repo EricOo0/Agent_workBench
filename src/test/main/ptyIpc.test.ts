@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { makePtyId } from '../../shared/ptyId';
 
 type ExitPayload = {
@@ -42,6 +43,59 @@ const knowledgeCaptureMarkIdleMock = vi.fn(async () => undefined);
 const knowledgeCaptureEndSessionMock = vi.fn(async () => undefined);
 const knowledgeCaptureGetSessionStateMock = vi.fn(() => null);
 const sessionDistillationRunMock = vi.fn(async () => undefined);
+const getKnowledgeSessionSummaryMock = vi.fn<
+  (sessionId: string) => Promise<Record<string, unknown> | null>
+>(async () => null);
+const listKnowledgeCandidatesMock = vi.fn<
+  (filters?: Record<string, unknown>) => Promise<Array<Record<string, unknown>>>
+>(async () => []);
+const promoteKnowledgeCandidateMock = vi.fn<
+  (args: Record<string, unknown>) => Promise<Record<string, unknown> | null>
+>(async () => null);
+const rejectKnowledgeCandidateMock = vi.fn<
+  (candidateId: string, reviewedBy?: string | null) => Promise<Record<string, unknown> | null>
+>(async () => null);
+const archiveKnowledgeCandidateMock = vi.fn<
+  (candidateId: string) => Promise<Record<string, unknown> | null>
+>(async () => null);
+const listKnowledgeCardsMock = vi.fn<
+  (filters?: Record<string, unknown>) => Promise<Array<Record<string, unknown>>>
+>(async () => []);
+const getKnowledgeOverviewAggregatesMock = vi.fn<
+  (filters?: Record<string, unknown>) => Promise<Record<string, unknown>>
+>(async () => ({
+  overviewStats: {
+    totalSessions: 0,
+    activeSessions: 0,
+    idleSessions: 0,
+    distillingSessions: 0,
+    distilledSessions: 0,
+    failedSessions: 0,
+    lastUpdatedAt: 0,
+  },
+  sessionSummaryCount: 0,
+  candidateCount: 0,
+  cardCount: 0,
+  candidateStatusCounts: {
+    new: 0,
+    reviewed: 0,
+    promoted: 0,
+    rejected: 0,
+    archived: 0,
+  },
+  cardStatusCounts: {
+    active: 0,
+    archived: 0,
+  },
+  distillationStatusCounts: {
+    queued: 0,
+    running: 0,
+    succeeded: 0,
+    failed: 0,
+    skipped: 0,
+  },
+  updatedAt: 0,
+}));
 const execFileMock = vi.fn(
   (
     _cmd: string,
@@ -230,6 +284,7 @@ vi.mock('../../shared/providers/registry', () => ({
   getProvider: vi.fn((id: string) => ({
     name: id === 'codex' ? 'Codex' : id === 'opencode' ? 'OpenCode' : 'Claude Code',
   })),
+  listDetectableProviders: vi.fn(() => []),
 }));
 
 vi.mock('../../main/errorTracking', () => ({
@@ -251,7 +306,15 @@ vi.mock('../../main/services/TerminalConfigParser', () => ({
 }));
 
 vi.mock('../../main/services/DatabaseService', () => ({
-  databaseService: {},
+  databaseService: {
+    getKnowledgeSessionSummary: getKnowledgeSessionSummaryMock,
+    listKnowledgeCandidates: listKnowledgeCandidatesMock,
+    promoteKnowledgeCandidate: promoteKnowledgeCandidateMock,
+    rejectKnowledgeCandidate: rejectKnowledgeCandidateMock,
+    archiveKnowledgeCandidate: archiveKnowledgeCandidateMock,
+    listKnowledgeCards: listKnowledgeCardsMock,
+    getKnowledgeOverviewAggregates: getKnowledgeOverviewAggregatesMock,
+  },
 }));
 
 vi.mock('../../main/services/ClaudeConfigService', () => ({
@@ -326,6 +389,7 @@ vi.mock('../../main/services/TaskLifecycleService', () => ({
 }));
 
 vi.mock('child_process', () => ({
+  exec: vi.fn(),
   execFile: execFileMock,
 }));
 
@@ -1073,5 +1137,232 @@ describe('ptyIpc notification lifecycle', () => {
     await handlerPromise;
 
     expect(startPtyMock).toHaveBeenCalledOnce();
+  });
+});
+
+describe('knowledge IPC surface', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+    ipcHandleHandlers.clear();
+    ipcOnHandlers.clear();
+    appListeners.clear();
+    ptys.clear();
+  });
+
+  it('registers knowledge handlers from the main IPC index', async () => {
+    const indexSource = readFileSync(new URL('../../main/ipc/index.ts', import.meta.url), 'utf8');
+    const preloadSource = readFileSync(new URL('../../main/preload.ts', import.meta.url), 'utf8');
+
+    expect(indexSource).toContain("import { registerKnowledgeIpc } from './knowledgeIpc';");
+    expect(indexSource).toContain('registerKnowledgeIpc();');
+    expect(preloadSource).toContain("ipcRenderer.invoke('knowledge:getSessionSummary'");
+    expect(preloadSource).toContain("ipcRenderer.invoke('knowledge:listCandidates'");
+    expect(preloadSource).toContain("ipcRenderer.invoke('knowledge:reviewCandidate'");
+    expect(preloadSource).toContain("ipcRenderer.invoke('knowledge:listCards'");
+    expect(preloadSource).toContain("ipcRenderer.invoke('knowledge:getOverview'");
+  });
+
+  it('returns session summary data through the knowledge session summary handler', async () => {
+    const summary = {
+      sessionId: 'session-1',
+      lifecycleState: 'distilled',
+      distillation: null,
+      candidate: null,
+      card: null,
+      updatedAt: 123,
+    };
+    getKnowledgeSessionSummaryMock.mockResolvedValueOnce(summary);
+
+    const { registerKnowledgeIpc } = await import('../../main/ipc/knowledgeIpc');
+    registerKnowledgeIpc();
+
+    const handler = ipcHandleHandlers.get('knowledge:getSessionSummary');
+    expect(handler).toBeTypeOf('function');
+
+    const result = await handler!({}, { sessionId: 'session-1' });
+
+    expect(getKnowledgeSessionSummaryMock).toHaveBeenCalledWith('session-1');
+    expect(result).toEqual({ success: true, data: summary });
+  });
+
+  it('passes candidate filters through the candidate list handler', async () => {
+    const candidates = [{ id: 'cand-1', sessionId: 'session-1', status: 'new' }];
+    listKnowledgeCandidatesMock.mockResolvedValueOnce(candidates as any);
+
+    const { registerKnowledgeIpc } = await import('../../main/ipc/knowledgeIpc');
+    registerKnowledgeIpc();
+
+    const handler = ipcHandleHandlers.get('knowledge:listCandidates');
+    expect(handler).toBeTypeOf('function');
+
+    const filters = {
+      query: 'cache',
+      candidateStatuses: ['new'],
+      limit: 10,
+      offset: 5,
+    };
+    const result = await handler!({}, { filters });
+
+    expect(listKnowledgeCandidatesMock).toHaveBeenCalledWith(filters);
+    expect(result).toEqual({ success: true, data: candidates });
+  });
+
+  it('maps a promote review action to the promotion helper', async () => {
+    const promotedCandidate = {
+      id: 'cand-1',
+      sessionId: 'session-1',
+      status: 'promoted',
+      promotedCardId: 'card-1',
+    };
+    promoteKnowledgeCandidateMock.mockResolvedValueOnce(promotedCandidate as any);
+
+    const { registerKnowledgeIpc } = await import('../../main/ipc/knowledgeIpc');
+    registerKnowledgeIpc();
+
+    const handler = ipcHandleHandlers.get('knowledge:reviewCandidate');
+    expect(handler).toBeTypeOf('function');
+
+    const card = {
+      id: 'card-1',
+      taskId: 'task-1',
+      sessionId: 'session-1',
+      title: 'Cache invalidation',
+      cardKind: 'decision',
+      summary: 'Use tag-based invalidation',
+      content: 'Promoted from candidate',
+    };
+    const result = await handler!({}, { candidateId: 'cand-1', action: 'promote', card });
+
+    expect(promoteKnowledgeCandidateMock).toHaveBeenCalledWith({
+      candidateId: 'cand-1',
+      card,
+      reviewedBy: null,
+    });
+    expect(rejectKnowledgeCandidateMock).not.toHaveBeenCalled();
+    expect(archiveKnowledgeCandidateMock).not.toHaveBeenCalled();
+    expect(result).toEqual({ success: true, data: promotedCandidate });
+  });
+
+  it('maps reject and archive review actions to their helpers', async () => {
+    rejectKnowledgeCandidateMock.mockResolvedValueOnce({ id: 'cand-2', status: 'rejected' } as any);
+    archiveKnowledgeCandidateMock.mockResolvedValueOnce({
+      id: 'cand-3',
+      status: 'archived',
+    } as any);
+
+    const { registerKnowledgeIpc } = await import('../../main/ipc/knowledgeIpc');
+    registerKnowledgeIpc();
+
+    const handler = ipcHandleHandlers.get('knowledge:reviewCandidate');
+    expect(handler).toBeTypeOf('function');
+
+    const rejectResult = await handler!(
+      {},
+      {
+        candidateId: 'cand-2',
+        action: 'reject',
+        reviewedBy: 'reviewer-1',
+      }
+    );
+    const archiveResult = await handler!({}, { candidateId: 'cand-3', action: 'archive' });
+
+    expect(rejectKnowledgeCandidateMock).toHaveBeenCalledWith('cand-2', 'reviewer-1');
+    expect(archiveKnowledgeCandidateMock).toHaveBeenCalledWith('cand-3');
+    expect(rejectResult).toEqual({
+      success: true,
+      data: { id: 'cand-2', status: 'rejected' },
+    });
+    expect(archiveResult).toEqual({
+      success: true,
+      data: { id: 'cand-3', status: 'archived' },
+    });
+  });
+
+  it('rejects promote actions that do not provide a card payload', async () => {
+    const { registerKnowledgeIpc } = await import('../../main/ipc/knowledgeIpc');
+    registerKnowledgeIpc();
+
+    const handler = ipcHandleHandlers.get('knowledge:reviewCandidate');
+    expect(handler).toBeTypeOf('function');
+
+    const result = await handler!({}, { candidateId: 'cand-1', action: 'promote' });
+
+    expect(promoteKnowledgeCandidateMock).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      success: false,
+      error: 'A promotion card payload is required for promote actions.',
+    });
+  });
+
+  it('passes filters through card list and overview handlers', async () => {
+    const cards = [{ id: 'card-1', status: 'active' }];
+    const overview = {
+      overviewStats: {
+        totalSessions: 2,
+        activeSessions: 1,
+        idleSessions: 0,
+        distillingSessions: 0,
+        distilledSessions: 1,
+        failedSessions: 0,
+        lastUpdatedAt: 456,
+      },
+      sessionSummaryCount: 2,
+      candidateCount: 3,
+      cardCount: 1,
+      candidateStatusCounts: {
+        new: 1,
+        reviewed: 0,
+        promoted: 1,
+        rejected: 1,
+        archived: 0,
+      },
+      cardStatusCounts: {
+        active: 1,
+        archived: 0,
+      },
+      distillationStatusCounts: {
+        queued: 0,
+        running: 0,
+        succeeded: 2,
+        failed: 0,
+        skipped: 0,
+      },
+      updatedAt: 456,
+    };
+    listKnowledgeCardsMock.mockResolvedValueOnce(cards as any);
+    getKnowledgeOverviewAggregatesMock.mockResolvedValueOnce(overview as any);
+
+    const { registerKnowledgeIpc } = await import('../../main/ipc/knowledgeIpc');
+    registerKnowledgeIpc();
+
+    const listCards = ipcHandleHandlers.get('knowledge:listCards');
+    const getOverview = ipcHandleHandlers.get('knowledge:getOverview');
+    expect(listCards).toBeTypeOf('function');
+    expect(getOverview).toBeTypeOf('function');
+
+    const cardFilters = { query: 'cache', status: ['active'], limit: 5, offset: 1 };
+    const overviewFilters = { query: 'cache', candidateStatuses: ['promoted'], limit: 20 };
+    const listResult = await listCards!({}, { filters: cardFilters });
+    const overviewResult = await getOverview!({}, { filters: overviewFilters });
+
+    expect(listKnowledgeCardsMock).toHaveBeenCalledWith(cardFilters);
+    expect(getKnowledgeOverviewAggregatesMock).toHaveBeenCalledWith(overviewFilters);
+    expect(listResult).toEqual({ success: true, data: cards });
+    expect(overviewResult).toEqual({ success: true, data: overview });
+  });
+
+  it('wraps knowledge IPC errors in the standard response envelope', async () => {
+    listKnowledgeCandidatesMock.mockRejectedValueOnce(new Error('query failed'));
+
+    const { registerKnowledgeIpc } = await import('../../main/ipc/knowledgeIpc');
+    registerKnowledgeIpc();
+
+    const handler = ipcHandleHandlers.get('knowledge:listCandidates');
+    expect(handler).toBeTypeOf('function');
+
+    const result = await handler!({}, { filters: { query: 'cache' } });
+
+    expect(result).toEqual({ success: false, error: 'query failed' });
   });
 });
