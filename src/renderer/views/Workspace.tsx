@@ -41,6 +41,7 @@ import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { SettingsPageTab } from '@/components/SettingsPage';
 const PANEL_RESIZE_DRAGGING_EVENT = 'emdash:panel-resize-dragging';
 type ResizeHandleId = 'left' | 'right';
+type KnowledgeRoute = 'overview' | 'inbox' | 'library' | null;
 
 const RightSidebarBridge: React.FC<{
   onCollapsedChange: (collapsed: boolean) => void;
@@ -105,9 +106,11 @@ export function Workspace() {
   const [showSettingsPage, setShowSettingsPage] = useState(false);
   const [settingsPageInitialTab, setSettingsPageInitialTab] = useState<SettingsPageTab>('general');
   const [showCommandPalette, setShowCommandPalette] = useState(false);
+  const [showKnowledgeOverview, setShowKnowledgeOverview] = useState(false);
   const [showKnowledgeInbox, setShowKnowledgeInbox] = useState(false);
   const [showKnowledgeLibrary, setShowKnowledgeLibrary] = useState(false);
   const [knowledgeInboxSessionId, setKnowledgeInboxSessionId] = useState<string | null>(null);
+  const knowledgeBackTargetRef = useRef<KnowledgeRoute>(null);
 
   const openSettingsPage = useCallback((tab: SettingsPageTab = 'general') => {
     setSettingsPageInitialTab(tab);
@@ -117,11 +120,18 @@ export function Workspace() {
   const handleCloseSettingsPage = useCallback(() => setShowSettingsPage(false), []);
   const handleToggleCommandPalette = useCallback(() => setShowCommandPalette((prev) => !prev), []);
   const handleCloseCommandPalette = useCallback(() => setShowCommandPalette(false), []);
+  const handleCloseKnowledgeOverview = useCallback(() => {
+    setShowKnowledgeOverview(false);
+  }, []);
   const handleCloseKnowledgeInbox = useCallback(() => {
+    const shouldReturnToOverview = knowledgeBackTargetRef.current === 'overview';
+    setShowKnowledgeOverview(shouldReturnToOverview);
     setShowKnowledgeInbox(false);
     setKnowledgeInboxSessionId(null);
   }, []);
   const handleCloseKnowledgeLibrary = useCallback(() => {
+    const shouldReturnToOverview = knowledgeBackTargetRef.current === 'overview';
+    setShowKnowledgeOverview(shouldReturnToOverview);
     setShowKnowledgeLibrary(false);
   }, []);
   const [showDiffViewer, setShowDiffViewer] = useState(false);
@@ -191,8 +201,10 @@ export function Workspace() {
   const projectMgmt = useProjectManagementContext();
   const { showEditorMode, setShowEditorMode, setShowKanban } = projectMgmt;
   const handleOpenKnowledgeInbox = useCallback(
-    (sessionId?: string | null) => {
+    (sessionId?: string | null, options?: { backTarget?: KnowledgeRoute }) => {
+      knowledgeBackTargetRef.current = options?.backTarget ?? null;
       setKnowledgeInboxSessionId(sessionId ?? null);
+      setShowKnowledgeOverview(false);
       setShowKnowledgeInbox(true);
       setShowKnowledgeLibrary(false);
       setShowKanban(false);
@@ -204,8 +216,22 @@ export function Workspace() {
     [handleCloseCommandPalette, handleCloseSettingsPage, setShowEditorMode, setShowKanban]
   );
   const handleOpenKnowledgeLibrary = useCallback(() => {
+    knowledgeBackTargetRef.current = null;
     setShowKnowledgeLibrary(true);
+    setShowKnowledgeOverview(false);
     setShowKnowledgeInbox(false);
+    setKnowledgeInboxSessionId(null);
+    setShowKanban(false);
+    setShowEditorMode(false);
+    setShowDiffViewer(false);
+    handleCloseSettingsPage();
+    handleCloseCommandPalette();
+  }, [handleCloseCommandPalette, handleCloseSettingsPage, setShowEditorMode, setShowKanban]);
+  const handleOpenKnowledgeOverview = useCallback(() => {
+    knowledgeBackTargetRef.current = null;
+    setShowKnowledgeOverview(true);
+    setShowKnowledgeInbox(false);
+    setShowKnowledgeLibrary(false);
     setKnowledgeInboxSessionId(null);
     setShowKanban(false);
     setShowEditorMode(false);
@@ -252,6 +278,22 @@ export function Workspace() {
     };
   }, [handleOpenKnowledgeLibrary]);
 
+  useEffect(() => {
+    const handleOpenOverviewEvent = () => {
+      handleOpenKnowledgeOverview();
+    };
+    window.addEventListener(
+      'emdash:open-knowledge-overview',
+      handleOpenOverviewEvent as EventListener
+    );
+    return () => {
+      window.removeEventListener(
+        'emdash:open-knowledge-overview',
+        handleOpenOverviewEvent as EventListener
+      );
+    };
+  }, [handleOpenKnowledgeOverview]);
+
   const handleToggleKanban = useCallback(() => {
     if (!projectMgmt.selectedProject) return;
     handleCloseKnowledgeInbox();
@@ -277,6 +319,39 @@ export function Workspace() {
   // --- Task management ---
   const taskMgmt = useTaskManagementContext();
 
+  const handleOpenOverviewSession = useCallback(
+    (sessionId: string) => {
+      const taskId = sessionId.split(':').filter(Boolean).pop() || sessionId;
+      const entry = taskMgmt.allTasks.find((item) => item.task.id === taskId);
+
+      if (!entry) {
+        handleOpenKnowledgeInbox(sessionId, { backTarget: 'overview' });
+        return;
+      }
+
+      if (!projectMgmt.selectedProject || projectMgmt.selectedProject.id !== entry.project.id) {
+        projectMgmt.activateProjectView(entry.project);
+      }
+
+      setShowKnowledgeOverview(false);
+      setShowKnowledgeInbox(false);
+      setShowKnowledgeLibrary(false);
+      setKnowledgeInboxSessionId(null);
+      setShowKanban(false);
+      setShowEditorMode(false);
+      handleCloseSettingsPage();
+      taskMgmt.handleSelectTask(entry.task);
+    },
+    [
+      handleCloseSettingsPage,
+      handleOpenKnowledgeInbox,
+      projectMgmt,
+      setShowEditorMode,
+      setShowKanban,
+      taskMgmt,
+    ]
+  );
+
   // Focus task when OS notification is clicked
   const notificationFocusRef = useRef({
     allTasks: taskMgmt.allTasks,
@@ -300,6 +375,7 @@ export function Workspace() {
       if (!selectedProject || selectedProject.id !== project.id) {
         projectMgmt.activateProjectView(project);
       }
+      setShowKnowledgeOverview(false);
       handleCloseKnowledgeInbox();
       handleCloseKnowledgeLibrary();
       setShowKanban(false);
@@ -317,15 +393,31 @@ export function Workspace() {
 
   useEffect(() => {
     if (projectMgmt.showHomeView || projectMgmt.showSkillsView || projectMgmt.showMcpView) {
+      handleCloseKnowledgeOverview();
       handleCloseKnowledgeInbox();
       handleCloseKnowledgeLibrary();
     }
   }, [
+    handleCloseKnowledgeOverview,
     handleCloseKnowledgeInbox,
     handleCloseKnowledgeLibrary,
     projectMgmt.showHomeView,
     projectMgmt.showMcpView,
     projectMgmt.showSkillsView,
+  ]);
+
+  useEffect(() => {
+    if (!showKnowledgeOverview) return;
+    if (showSettingsPage || showDiffViewer || showEditorMode || projectMgmt.showKanban) {
+      handleCloseKnowledgeOverview();
+    }
+  }, [
+    handleCloseKnowledgeOverview,
+    projectMgmt.showKanban,
+    showDiffViewer,
+    showEditorMode,
+    showKnowledgeOverview,
+    showSettingsPage,
   ]);
 
   useEffect(() => {
@@ -362,6 +454,13 @@ export function Workspace() {
   useEffect(() => {
     const previousProjectId = previousSelectedProjectIdRef.current;
     const nextProjectId = projectMgmt.selectedProject?.id ?? null;
+    if (
+      showKnowledgeOverview &&
+      previousProjectId !== null &&
+      nextProjectId !== previousProjectId
+    ) {
+      handleCloseKnowledgeOverview();
+    }
     if (showKnowledgeInbox && previousProjectId !== null && nextProjectId !== previousProjectId) {
       handleCloseKnowledgeInbox();
     }
@@ -370,9 +469,11 @@ export function Workspace() {
     }
     previousSelectedProjectIdRef.current = nextProjectId;
   }, [
+    handleCloseKnowledgeOverview,
     handleCloseKnowledgeInbox,
     handleCloseKnowledgeLibrary,
     projectMgmt.selectedProject?.id,
+    showKnowledgeOverview,
     showKnowledgeInbox,
     showKnowledgeLibrary,
   ]);
@@ -573,11 +674,21 @@ export function Workspace() {
                       ) : (
                         <MainContentArea
                           showSettingsPage={showSettingsPage}
+                          showKnowledgeOverview={showKnowledgeOverview}
                           showKnowledgeInbox={showKnowledgeInbox}
                           showKnowledgeLibrary={showKnowledgeLibrary}
                           knowledgeInboxSessionId={knowledgeInboxSessionId}
+                          onCloseKnowledgeOverview={handleCloseKnowledgeOverview}
                           onCloseKnowledgeInbox={handleCloseKnowledgeInbox}
                           onCloseKnowledgeLibrary={handleCloseKnowledgeLibrary}
+                          onOpenKnowledgeInboxFromOverview={(sessionId) =>
+                            handleOpenKnowledgeInbox(sessionId, { backTarget: 'overview' })
+                          }
+                          onOpenKnowledgeLibraryFromOverview={() => {
+                            knowledgeBackTargetRef.current = 'overview';
+                            handleOpenKnowledgeLibrary();
+                          }}
+                          onOpenKnowledgeSessionFromOverview={handleOpenOverviewSession}
                           settingsPageInitialTab={settingsPageInitialTab}
                           handleCloseSettingsPage={handleCloseSettingsPage}
                         />
