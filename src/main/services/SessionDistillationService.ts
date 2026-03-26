@@ -78,7 +78,8 @@ export class SessionDistillationService {
   constructor(deps: ServiceDeps = {}) {
     this.persistence = deps.persistence ?? databaseService;
     this.runner = deps.runner ?? new CliDistillationRunner();
-    this.getSnapshot = deps.getSnapshot ?? ((sessionId) => terminalSnapshotService.getSnapshot(sessionId));
+    this.getSnapshot =
+      deps.getSnapshot ?? ((sessionId) => terminalSnapshotService.getSnapshot(sessionId));
     this.now = deps.now ?? (() => Date.now());
     this.randomId =
       deps.randomId ??
@@ -298,8 +299,12 @@ export class SessionDistillationService {
           title,
           cardKind: this.normalizeCardKind((candidate as DistillationCandidateOutput).card_kind),
           summary,
-          bodyMarkdown: this.normalizeString((candidate as DistillationCandidateOutput).body_markdown),
-          confidence: this.normalizeConfidence((candidate as DistillationCandidateOutput).confidence),
+          bodyMarkdown: this.normalizeString(
+            (candidate as DistillationCandidateOutput).body_markdown
+          ),
+          confidence: this.normalizeConfidence(
+            (candidate as DistillationCandidateOutput).confidence
+          ),
           evidenceRefs,
           sourceCount: evidenceRefs.length,
           tags: this.normalizeTags((candidate as DistillationCandidateOutput).tags),
@@ -424,7 +429,9 @@ class CliDistillationRunner implements DistillationRunner {
       throw new Error(`Distillation provider unavailable: ${args.providerId}`);
     }
     if (provider.useKeystrokeInjection) {
-      throw new Error(`Distillation provider does not support non-interactive prompts: ${args.providerId}`);
+      throw new Error(
+        `Distillation provider does not support non-interactive prompts: ${args.providerId}`
+      );
     }
 
     const command = provider.cli;

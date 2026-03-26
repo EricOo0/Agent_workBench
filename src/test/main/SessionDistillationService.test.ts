@@ -80,14 +80,15 @@ describe('SessionDistillationService', () => {
       updatedAt: record.updatedAt ?? 5_000,
     }))
   );
-  const runPrompt = vi.fn<
-    (args: {
-      providerId: string;
-      task: Task;
-      session: SessionRuntimeStatsRecord;
-      prompt: string;
-    }) => Promise<string>
-  >();
+  const runPrompt =
+    vi.fn<
+      (args: {
+        providerId: string;
+        task: Task;
+        session: SessionRuntimeStatsRecord;
+        prompt: string;
+      }) => Promise<string>
+    >();
 
   let service: SessionDistillationService;
 

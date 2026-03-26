@@ -1,8 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  knowledgeCandidateStatuses,
-  knowledgeCardStatuses,
-} from '../../shared/knowledge/types';
+import { knowledgeCandidateStatuses, knowledgeCardStatuses } from '../../shared/knowledge/types';
 
 vi.mock('../../main/db/path', () => ({
   resolveDatabasePath: () => '/tmp/emdash-schema-contract-test.db',

@@ -85,7 +85,10 @@ export class KnowledgeCaptureService {
     return this.cloneState(state);
   }
 
-  async markIdle(sessionId: string, args: MarkIdleArgs = {}): Promise<KnowledgeSessionState | null> {
+  async markIdle(
+    sessionId: string,
+    args: MarkIdleArgs = {}
+  ): Promise<KnowledgeSessionState | null> {
     const state = this.sessions.get(sessionId);
     if (!state || state.state === 'ended') return state ? this.cloneState(state) : null;
 
@@ -101,7 +104,10 @@ export class KnowledgeCaptureService {
     return this.cloneState(state);
   }
 
-  async endSession(sessionId: string, args: EndSessionArgs = {}): Promise<KnowledgeSessionState | null> {
+  async endSession(
+    sessionId: string,
+    args: EndSessionArgs = {}
+  ): Promise<KnowledgeSessionState | null> {
     const state = this.sessions.get(sessionId);
     if (!state) return null;
     if (state.state === 'ended') return this.cloneState(state);

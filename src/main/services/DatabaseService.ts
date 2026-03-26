@@ -1417,16 +1417,21 @@ export class DatabaseService {
         : distillationRows;
 
     const now = Date.now();
-    const lastUpdatedAt = runtimeRowsInOverview.reduce((max, row) => Math.max(max, row.updatedAt), 0);
+    const lastUpdatedAt = runtimeRowsInOverview.reduce(
+      (max, row) => Math.max(max, row.updatedAt),
+      0
+    );
 
     return {
       overviewStats: {
         totalSessions: runtimeRowsInOverview.length,
         activeSessions: runtimeRowsInOverview.filter((row) => row.status === 'active').length,
         idleSessions: runtimeRowsInOverview.filter((row) => row.status === 'idle').length,
-        distillingSessions: runtimeRowsInOverview.filter((row) => row.status === 'distilling').length,
+        distillingSessions: runtimeRowsInOverview.filter((row) => row.status === 'distilling')
+          .length,
         distilledSessions: runtimeRowsInOverview.filter((row) => row.status === 'distilled').length,
-        failedSessions: runtimeRowsInOverview.filter((row) => row.status === 'distill_failed').length,
+        failedSessions: runtimeRowsInOverview.filter((row) => row.status === 'distill_failed')
+          .length,
         lastUpdatedAt: lastUpdatedAt || now,
       },
       sessionSummaryCount: runtimeRowsInOverview.length,
@@ -1434,21 +1439,31 @@ export class DatabaseService {
       cardCount: cardRowsInOverview.length,
       candidateStatusCounts: {
         new: candidateRowsInOverview.filter((row) => row.candidate.status === 'new').length,
-        reviewed: candidateRowsInOverview.filter((row) => row.candidate.status === 'reviewed').length,
-        promoted: candidateRowsInOverview.filter((row) => row.candidate.status === 'promoted').length,
-        rejected: candidateRowsInOverview.filter((row) => row.candidate.status === 'rejected').length,
-        archived: candidateRowsInOverview.filter((row) => row.candidate.status === 'archived').length,
+        reviewed: candidateRowsInOverview.filter((row) => row.candidate.status === 'reviewed')
+          .length,
+        promoted: candidateRowsInOverview.filter((row) => row.candidate.status === 'promoted')
+          .length,
+        rejected: candidateRowsInOverview.filter((row) => row.candidate.status === 'rejected')
+          .length,
+        archived: candidateRowsInOverview.filter((row) => row.candidate.status === 'archived')
+          .length,
       },
       cardStatusCounts: {
         active: cardRowsInOverview.filter((row) => row.card.status === 'active').length,
         archived: cardRowsInOverview.filter((row) => row.card.status === 'archived').length,
       },
       distillationStatusCounts: {
-        queued: distillationRowsInOverview.filter((row) => row.distillation.status === 'queued').length,
-        running: distillationRowsInOverview.filter((row) => row.distillation.status === 'running').length,
-        succeeded: distillationRowsInOverview.filter((row) => row.distillation.status === 'succeeded').length,
-        failed: distillationRowsInOverview.filter((row) => row.distillation.status === 'failed').length,
-        skipped: distillationRowsInOverview.filter((row) => row.distillation.status === 'skipped').length,
+        queued: distillationRowsInOverview.filter((row) => row.distillation.status === 'queued')
+          .length,
+        running: distillationRowsInOverview.filter((row) => row.distillation.status === 'running')
+          .length,
+        succeeded: distillationRowsInOverview.filter(
+          (row) => row.distillation.status === 'succeeded'
+        ).length,
+        failed: distillationRowsInOverview.filter((row) => row.distillation.status === 'failed')
+          .length,
+        skipped: distillationRowsInOverview.filter((row) => row.distillation.status === 'skipped')
+          .length,
       },
       updatedAt: lastUpdatedAt || now,
     };
