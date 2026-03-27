@@ -1,22 +1,45 @@
 import type sqlite3Type from 'sqlite3';
-import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, like, or, sql } from 'drizzle-orm';
 import { readMigrationFiles } from 'drizzle-orm/migrator';
+import { parsePtyId } from '../../shared/ptyId';
 import { resolveDatabasePath, resolveMigrationsPath } from '../db/path';
 import { getDrizzleClient } from '../db/drizzleClient';
 import { errorTracking } from '../errorTracking';
 import {
+  knowledgeCandidates as knowledgeCandidatesTable,
+  knowledgeCards as knowledgeCardsTable,
   projects as projectsTable,
+  sessionDistillations as sessionDistillationsTable,
+  sessionRuntimeStats as sessionRuntimeStatsTable,
   tasks as tasksTable,
   conversations as conversationsTable,
   messages as messagesTable,
   sshConnections as sshConnectionsTable,
+  type KnowledgeCandidateRow,
+  type KnowledgeCardRow,
   type ProjectRow,
+  type SessionDistillationRow,
+  type SessionRuntimeStatsRow,
   type TaskRow,
   type ConversationRow,
   type MessageRow,
   type SshConnectionRow,
   type SshConnectionInsert,
 } from '../db/schema';
+import type {
+  DistillationStatus,
+  KnowledgeCandidate,
+  KnowledgeCandidateStatus,
+  KnowledgeCard,
+  KnowledgeCardFilters,
+  KnowledgeCardStatus,
+  KnowledgeDistillationRecord,
+  KnowledgeEvidenceRef,
+  KnowledgeInboxFilters,
+  KnowledgeOverviewPayload,
+  KnowledgeSessionSummary,
+  SessionLifecycleState,
+} from '../../shared/knowledge/types';
 
 export interface Project {
   id: string;
@@ -77,10 +100,117 @@ export interface Message {
   metadata?: string; // JSON string for additional data
 }
 
+export interface SessionDistillationSourceRecord {
+  task: Task;
+  session: SessionRuntimeStatsRecord;
+  conversations: Conversation[];
+  messagesByConversationId: Record<string, Message[]>;
+}
+
 export interface MigrationSummary {
   appliedCount: number;
   totalMigrations: number;
   recovered: boolean;
+}
+
+export interface SessionRuntimeStatsRecord {
+  id: string;
+  taskId: string;
+  sessionId: string;
+  provider?: string | null;
+  status: SessionLifecycleState;
+  startedAt: number;
+  endedAt?: number | null;
+  activeDurationMs?: number;
+  idleDurationMs?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  usageMetadata?: Record<string, unknown> | null;
+  createdAt?: number;
+  updatedAt?: number;
+}
+
+export interface SessionDistillationUpsert {
+  id: string;
+  taskId: string;
+  sessionId: string;
+  provider?: string | null;
+  status: DistillationStatus;
+  promptVersion?: string | null;
+  startedAt: number;
+  updatedAt?: number;
+  finishedAt?: number | null;
+  errorMessage?: string | null;
+  rawResponse?: string | null;
+  summaryMarkdown?: string | null;
+  finalConclusion?: string | null;
+  evidenceRefs?: KnowledgeEvidenceRef[];
+  createdAt?: number;
+}
+
+export interface SessionDistillationRecord extends KnowledgeDistillationRecord {
+  taskId: string;
+  provider?: string | null;
+  promptVersion?: string | null;
+  rawResponse?: string | null;
+  summaryMarkdown?: string | null;
+  finalConclusion?: string | null;
+  createdAt: number;
+}
+
+export interface KnowledgeCandidateRecord extends KnowledgeCandidate {
+  taskId: string;
+  distillationId?: string | null;
+  cardKind: string;
+  bodyMarkdown?: string | null;
+  confidence?: number | null;
+  tags: string[];
+}
+
+export interface KnowledgeCardRecord extends KnowledgeCard {
+  taskId: string;
+  sessionId: string;
+  cardKind: string;
+  tags: string[];
+}
+
+export interface KnowledgeCandidateInput {
+  id: string;
+  taskId: string;
+  sessionId: string;
+  distillationId?: string | null;
+  title: string;
+  cardKind: string;
+  summary: string;
+  bodyMarkdown?: string | null;
+  sourceCount?: number;
+  confidence?: number | null;
+  status?: KnowledgeCandidateStatus;
+  evidenceRefs?: KnowledgeEvidenceRef[];
+  tags?: string[];
+  reviewedAt?: number | null;
+  reviewedBy?: string | null;
+  promotedCardId?: string | null;
+  archivedAt?: number | null;
+  createdAt?: number;
+  updatedAt?: number;
+}
+
+export interface KnowledgeCardInput {
+  id: string;
+  candidateId?: string | null;
+  taskId: string;
+  sessionId: string;
+  title: string;
+  cardKind: string;
+  summary: string;
+  content: string;
+  status?: KnowledgeCardStatus;
+  evidenceRefs?: KnowledgeEvidenceRef[];
+  tags?: string[];
+  createdAt?: number;
+  updatedAt?: number;
+  archivedAt?: number | null;
 }
 
 export class DatabaseSchemaMismatchError extends Error {
@@ -119,6 +249,7 @@ export class ProjectConflictError extends Error {
 }
 
 export class DatabaseService {
+  private static readonly ACTIVE_RUNTIME_FRESHNESS_MS = 6 * 60 * 60 * 1000;
   private static migrationsApplied = false;
   private db: sqlite3Type.Database | null = null;
   private sqlite3: typeof sqlite3Type | null = null;
@@ -487,6 +618,18 @@ export class DatabaseService {
     return rows.map((row) => this.mapDrizzleConversationRow(row));
   }
 
+  async getConversationById(conversationId: string): Promise<Conversation | null> {
+    if (this.disabled) return null;
+    if (!conversationId) return null;
+    const { db } = await getDrizzleClient();
+    const rows = await db
+      .select()
+      .from(conversationsTable)
+      .where(eq(conversationsTable.id, conversationId))
+      .limit(1);
+    return rows[0] ? this.mapDrizzleConversationRow(rows[0]) : null;
+  }
+
   async getOrCreateDefaultConversation(taskId: string, provider?: string): Promise<Conversation> {
     if (this.disabled) {
       return {
@@ -801,6 +944,579 @@ export class DatabaseService {
     await db.delete(sshConnectionsTable).where(eq(sshConnectionsTable.id, id));
   }
 
+  async upsertSessionRuntimeStats(
+    stats: SessionRuntimeStatsRecord
+  ): Promise<SessionRuntimeStatsRecord> {
+    if (this.disabled) return stats;
+    const { db } = await getDrizzleClient();
+    const now = Date.now();
+    const values = {
+      id: stats.id,
+      taskId: stats.taskId,
+      sessionId: stats.sessionId,
+      provider: stats.provider ?? null,
+      status: stats.status,
+      startedAt: stats.startedAt,
+      endedAt: stats.endedAt ?? null,
+      activeDurationMs: stats.activeDurationMs ?? 0,
+      idleDurationMs: stats.idleDurationMs ?? 0,
+      inputTokens: stats.inputTokens ?? 0,
+      outputTokens: stats.outputTokens ?? 0,
+      usageMetadataJson: this.stringifyJson(stats.usageMetadata ?? null),
+      createdAt: stats.createdAt ?? now,
+      updatedAt: stats.updatedAt ?? now,
+    } as const;
+    const existingRows = await db
+      .select()
+      .from(sessionRuntimeStatsTable)
+      .where(eq(sessionRuntimeStatsTable.sessionId, stats.sessionId))
+      .limit(1);
+    const existing = existingRows[0];
+
+    if (existing) {
+      if (
+        existing.taskId !== stats.taskId &&
+        !this.isLegacyChatRuntimeTaskScopeMismatch(existing.taskId, stats)
+      ) {
+        throw new Error(
+          `Session runtime stats scope mismatch for session ${stats.sessionId}: expected task ${existing.taskId}, received ${stats.taskId}`
+        );
+      }
+      const rows = await db
+        .update(sessionRuntimeStatsTable)
+        .set({
+          taskId: values.taskId,
+          provider: values.provider,
+          status: values.status,
+          startedAt: values.startedAt,
+          endedAt: values.endedAt,
+          activeDurationMs: values.activeDurationMs,
+          idleDurationMs: values.idleDurationMs,
+          inputTokens: values.inputTokens,
+          outputTokens: values.outputTokens,
+          usageMetadataJson: values.usageMetadataJson,
+          updatedAt: values.updatedAt,
+        })
+        .where(eq(sessionRuntimeStatsTable.sessionId, stats.sessionId))
+        .returning();
+
+      return this.mapSessionRuntimeStatsRow(rows[0]);
+    }
+
+    const rows = await db.insert(sessionRuntimeStatsTable).values(values).returning();
+    return this.mapSessionRuntimeStatsRow(rows[0]);
+  }
+
+  async upsertSessionDistillation(
+    distillation: SessionDistillationUpsert
+  ): Promise<SessionDistillationRecord> {
+    if (this.disabled) {
+      return {
+        id: distillation.id,
+        taskId: distillation.taskId,
+        sessionId: distillation.sessionId,
+        provider: distillation.provider ?? null,
+        status: distillation.status,
+        promptVersion: distillation.promptVersion ?? null,
+        startedAt: distillation.startedAt,
+        updatedAt: distillation.updatedAt ?? Date.now(),
+        finishedAt: distillation.finishedAt ?? null,
+        errorMessage: distillation.errorMessage ?? null,
+        rawResponse: distillation.rawResponse ?? null,
+        summaryMarkdown: distillation.summaryMarkdown ?? null,
+        finalConclusion: distillation.finalConclusion ?? null,
+        evidenceRefs: distillation.evidenceRefs ?? [],
+        createdAt: distillation.createdAt ?? Date.now(),
+      };
+    }
+
+    await this.assertDistillationScopeIsStable(distillation);
+
+    const { db } = await getDrizzleClient();
+    const now = Date.now();
+    const values = {
+      id: distillation.id,
+      taskId: distillation.taskId,
+      sessionId: distillation.sessionId,
+      provider: distillation.provider ?? null,
+      status: distillation.status,
+      promptVersion: distillation.promptVersion ?? null,
+      startedAt: distillation.startedAt,
+      updatedAt: distillation.updatedAt ?? now,
+      finishedAt: distillation.finishedAt ?? null,
+      errorMessage: distillation.errorMessage ?? null,
+      rawResponse: distillation.rawResponse ?? null,
+      summaryMarkdown: distillation.summaryMarkdown ?? null,
+      finalConclusion: distillation.finalConclusion ?? null,
+      evidenceRefsJson: this.stringifyJson(distillation.evidenceRefs ?? []),
+      createdAt: distillation.createdAt ?? now,
+    } as const;
+
+    const rows = await db
+      .insert(sessionDistillationsTable)
+      .values(values)
+      .onConflictDoUpdate({
+        target: sessionDistillationsTable.id,
+        set: {
+          taskId: values.taskId,
+          sessionId: values.sessionId,
+          provider: values.provider,
+          status: values.status,
+          promptVersion: values.promptVersion,
+          startedAt: values.startedAt,
+          updatedAt: values.updatedAt,
+          finishedAt: values.finishedAt,
+          errorMessage: values.errorMessage,
+          rawResponse: values.rawResponse,
+          summaryMarkdown: values.summaryMarkdown,
+          finalConclusion: values.finalConclusion,
+          evidenceRefsJson: values.evidenceRefsJson,
+        },
+      })
+      .returning();
+
+    return this.mapSessionDistillationRow(rows[0]);
+  }
+
+  async insertKnowledgeCandidates(
+    candidates: KnowledgeCandidateInput[]
+  ): Promise<KnowledgeCandidateRecord[]> {
+    if (this.disabled) return [];
+    if (candidates.length === 0) return [];
+
+    await this.assertKnowledgeCandidateLinksConsistent(candidates);
+
+    const { db } = await getDrizzleClient();
+    const now = Date.now();
+    const values = candidates.map((candidate) => ({
+      id: candidate.id,
+      taskId: candidate.taskId,
+      sessionId: candidate.sessionId,
+      distillationId: candidate.distillationId ?? null,
+      title: candidate.title,
+      cardKind: candidate.cardKind,
+      summary: candidate.summary,
+      bodyMarkdown: candidate.bodyMarkdown ?? null,
+      sourceCount: candidate.sourceCount ?? candidate.evidenceRefs?.length ?? 0,
+      confidence: candidate.confidence ?? null,
+      status: candidate.status ?? 'new',
+      evidenceRefsJson: this.stringifyJson(candidate.evidenceRefs ?? []),
+      tagsJson: this.stringifyJson(candidate.tags ?? []),
+      reviewedAt: candidate.reviewedAt ?? null,
+      reviewedBy: candidate.reviewedBy ?? null,
+      promotedCardId: candidate.promotedCardId ?? null,
+      archivedAt: candidate.archivedAt ?? null,
+      createdAt: candidate.createdAt ?? now,
+      updatedAt: candidate.updatedAt ?? now,
+    }));
+
+    const rows = await db.insert(knowledgeCandidatesTable).values(values).returning();
+    return rows.map((row) => this.mapKnowledgeCandidateRow(row));
+  }
+
+  async promoteKnowledgeCandidate(args: {
+    candidateId: string;
+    card: KnowledgeCardInput;
+    reviewedBy?: string | null;
+  }): Promise<KnowledgeCandidateRecord | null> {
+    if (this.disabled) return null;
+    const candidate = await this.assertKnowledgePromotionConsistent(args);
+    const { db } = await getDrizzleClient();
+    const now = Date.now();
+
+    await db.transaction(async (tx) => {
+      await tx
+        .insert(knowledgeCardsTable)
+        .values({
+          id: args.card.id,
+          candidateId: args.card.candidateId ?? args.candidateId,
+          taskId: args.card.taskId,
+          sessionId: args.card.sessionId,
+          title: args.card.title,
+          cardKind: args.card.cardKind,
+          summary: args.card.summary,
+          content: args.card.content,
+          status: args.card.status ?? 'active',
+          evidenceRefsJson: this.stringifyJson(args.card.evidenceRefs ?? []),
+          tagsJson: this.stringifyJson(args.card.tags ?? []),
+          createdAt: args.card.createdAt ?? now,
+          updatedAt: args.card.updatedAt ?? now,
+          archivedAt: args.card.archivedAt ?? null,
+        })
+        .onConflictDoUpdate({
+          target: knowledgeCardsTable.id,
+          set: {
+            candidateId: args.card.candidateId ?? args.candidateId,
+            taskId: args.card.taskId,
+            sessionId: args.card.sessionId,
+            title: args.card.title,
+            cardKind: args.card.cardKind,
+            summary: args.card.summary,
+            content: args.card.content,
+            status: args.card.status ?? 'active',
+            evidenceRefsJson: this.stringifyJson(args.card.evidenceRefs ?? []),
+            tagsJson: this.stringifyJson(args.card.tags ?? []),
+            updatedAt: args.card.updatedAt ?? now,
+            archivedAt: args.card.archivedAt ?? null,
+          },
+        });
+
+      await tx
+        .update(knowledgeCandidatesTable)
+        .set({
+          status: 'promoted',
+          promotedCardId: args.card.id,
+          reviewedBy: args.reviewedBy ?? null,
+          reviewedAt: now,
+          archivedAt: null,
+          updatedAt: now,
+        })
+        .where(eq(knowledgeCandidatesTable.id, args.candidateId));
+    });
+
+    return this.getKnowledgeCandidateById(args.candidateId);
+  }
+
+  async rejectKnowledgeCandidate(
+    candidateId: string,
+    reviewedBy?: string | null
+  ): Promise<KnowledgeCandidateRecord | null> {
+    return this.updateKnowledgeCandidateStatus(candidateId, 'rejected', {
+      reviewedBy: reviewedBy ?? null,
+      reviewedAt: Date.now(),
+      archivedAt: null,
+    });
+  }
+
+  async archiveKnowledgeCandidate(candidateId: string): Promise<KnowledgeCandidateRecord | null> {
+    return this.updateKnowledgeCandidateStatus(candidateId, 'archived', {
+      archivedAt: Date.now(),
+    });
+  }
+
+  async listKnowledgeCandidates(
+    filters: KnowledgeInboxFilters = {}
+  ): Promise<KnowledgeCandidateRecord[]> {
+    if (this.disabled) return [];
+    const { db } = await getDrizzleClient();
+    const predicates = this.buildKnowledgeCandidatePredicates(filters);
+
+    const rows = await db
+      .select({ candidate: knowledgeCandidatesTable })
+      .from(knowledgeCandidatesTable)
+      .leftJoin(
+        sessionRuntimeStatsTable,
+        eq(knowledgeCandidatesTable.sessionId, sessionRuntimeStatsTable.sessionId)
+      )
+      .leftJoin(
+        sessionDistillationsTable,
+        eq(knowledgeCandidatesTable.distillationId, sessionDistillationsTable.id)
+      )
+      .where(predicates.length > 0 ? and(...predicates) : undefined)
+      .orderBy(desc(knowledgeCandidatesTable.updatedAt))
+      .limit(filters.limit ?? 50)
+      .offset(filters.offset ?? 0);
+
+    return rows.map((row) => this.mapKnowledgeCandidateRow(row.candidate));
+  }
+
+  async listKnowledgeCards(filters: KnowledgeCardFilters = {}): Promise<KnowledgeCardRecord[]> {
+    if (this.disabled) return [];
+    const { db } = await getDrizzleClient();
+    const predicates = [];
+
+    if (filters.query?.trim()) {
+      const pattern = `%${filters.query.trim()}%`;
+      predicates.push(
+        or(
+          like(knowledgeCardsTable.title, pattern),
+          like(knowledgeCardsTable.summary, pattern),
+          like(knowledgeCardsTable.content, pattern)
+        )!
+      );
+    }
+    if (filters.status && filters.status.length > 0) {
+      predicates.push(inArray(knowledgeCardsTable.status, filters.status));
+    }
+
+    const rows = await db
+      .select()
+      .from(knowledgeCardsTable)
+      .where(predicates.length > 0 ? and(...predicates) : undefined)
+      .orderBy(desc(knowledgeCardsTable.updatedAt))
+      .limit(filters.limit ?? 50)
+      .offset(filters.offset ?? 0);
+
+    return rows.map((row) => this.mapKnowledgeCardRow(row));
+  }
+
+  async getKnowledgeSessionSummary(sessionId: string): Promise<KnowledgeSessionSummary | null> {
+    if (this.disabled) return null;
+    const { db } = await getDrizzleClient();
+
+    const runtimeRows = await db
+      .select()
+      .from(sessionRuntimeStatsTable)
+      .where(eq(sessionRuntimeStatsTable.sessionId, sessionId))
+      .limit(1);
+    const runtime = runtimeRows[0];
+    if (!runtime) return null;
+
+    const distillationRows = await db
+      .select()
+      .from(sessionDistillationsTable)
+      .where(eq(sessionDistillationsTable.sessionId, sessionId))
+      .orderBy(desc(sessionDistillationsTable.updatedAt), desc(sessionDistillationsTable.createdAt))
+      .limit(1);
+
+    const candidateRows = await db
+      .select()
+      .from(knowledgeCandidatesTable)
+      .where(eq(knowledgeCandidatesTable.sessionId, sessionId))
+      .orderBy(desc(knowledgeCandidatesTable.updatedAt), desc(knowledgeCandidatesTable.createdAt))
+      .limit(1);
+
+    const cardRows = await db
+      .select()
+      .from(knowledgeCardsTable)
+      .where(eq(knowledgeCardsTable.sessionId, sessionId))
+      .orderBy(desc(knowledgeCardsTable.updatedAt), desc(knowledgeCardsTable.createdAt))
+      .limit(1);
+
+    return {
+      sessionId,
+      lifecycleState: runtime.status as SessionLifecycleState,
+      distillation: distillationRows[0]
+        ? this.mapSessionDistillationRow(distillationRows[0])
+        : null,
+      candidate: candidateRows[0] ? this.mapKnowledgeCandidateRow(candidateRows[0]) : null,
+      card: cardRows[0] ? this.mapKnowledgeCardRow(cardRows[0]) : null,
+      updatedAt: runtime.updatedAt,
+    };
+  }
+
+  async getSessionDistillationSource(
+    sessionId: string
+  ): Promise<SessionDistillationSourceRecord | null> {
+    if (this.disabled) return null;
+
+    const { db } = await getDrizzleClient();
+    const sessionRows = await db
+      .select()
+      .from(sessionRuntimeStatsTable)
+      .where(eq(sessionRuntimeStatsTable.sessionId, sessionId))
+      .limit(1);
+    const sessionRow = sessionRows[0];
+    if (!sessionRow) return null;
+
+    const session = this.mapSessionRuntimeStatsRow(sessionRow);
+    const task = await this.getTaskById(session.taskId);
+    if (!task) return null;
+
+    const conversations = await this.getConversations(task.id);
+    const messagesByConversationId: Record<string, Message[]> = {};
+    for (const conversation of conversations) {
+      messagesByConversationId[conversation.id] = await this.getMessages(conversation.id);
+    }
+
+    return {
+      task,
+      session,
+      conversations,
+      messagesByConversationId,
+    };
+  }
+
+  async getKnowledgeOverviewAggregates(
+    filters: KnowledgeInboxFilters = {}
+  ): Promise<KnowledgeOverviewPayload> {
+    if (this.disabled) {
+      const now = Date.now();
+      return {
+        overviewStats: {
+          totalSessions: 0,
+          activeSessions: 0,
+          idleSessions: 0,
+          distillingSessions: 0,
+          distilledSessions: 0,
+          failedSessions: 0,
+          lastUpdatedAt: now,
+        },
+        activeTaskCount: 0,
+        sessionSummaryCount: 0,
+        candidateCount: 0,
+        cardCount: 0,
+        candidateStatusCounts: {
+          new: 0,
+          reviewed: 0,
+          promoted: 0,
+          rejected: 0,
+          archived: 0,
+        },
+        cardStatusCounts: {
+          active: 0,
+          archived: 0,
+        },
+        distillationStatusCounts: {
+          queued: 0,
+          running: 0,
+          succeeded: 0,
+          failed: 0,
+          skipped: 0,
+        },
+        tokenInput: null,
+        tokenOutput: null,
+        tokenUsageTotal: null,
+        agentActiveDurationMs: null,
+        updatedAt: now,
+      };
+    }
+
+    const { db } = await getDrizzleClient();
+    const sessionPredicates = this.buildKnowledgeSessionPredicates(filters);
+    const distillationPredicates = this.buildKnowledgeDistillationPredicates(filters);
+    const cardPredicates = this.buildKnowledgeCardOverviewPredicates(filters);
+
+    const runtimeRows = await db
+      .select()
+      .from(sessionRuntimeStatsTable)
+      .where(sessionPredicates.length > 0 ? and(...sessionPredicates) : undefined);
+
+    const candidatePredicates = this.buildKnowledgeCandidatePredicates(filters);
+    const candidateRows = await db
+      .select({ candidate: knowledgeCandidatesTable })
+      .from(knowledgeCandidatesTable)
+      .leftJoin(
+        sessionRuntimeStatsTable,
+        eq(knowledgeCandidatesTable.sessionId, sessionRuntimeStatsTable.sessionId)
+      )
+      .leftJoin(
+        sessionDistillationsTable,
+        eq(knowledgeCandidatesTable.distillationId, sessionDistillationsTable.id)
+      )
+      .where(candidatePredicates.length > 0 ? and(...candidatePredicates) : undefined);
+
+    const cardRows = await db
+      .select({ card: knowledgeCardsTable })
+      .from(knowledgeCardsTable)
+      .leftJoin(
+        sessionRuntimeStatsTable,
+        eq(knowledgeCardsTable.sessionId, sessionRuntimeStatsTable.sessionId)
+      )
+      .where(cardPredicates.length > 0 ? and(...cardPredicates) : undefined);
+
+    const distillationRows = await db
+      .select({ distillation: sessionDistillationsTable })
+      .from(sessionDistillationsTable)
+      .leftJoin(
+        sessionRuntimeStatsTable,
+        eq(sessionDistillationsTable.sessionId, sessionRuntimeStatsTable.sessionId)
+      )
+      .where(distillationPredicates.length > 0 ? and(...distillationPredicates) : undefined);
+
+    const overviewSessionIds = this.buildKnowledgeOverviewSessionUniverse({
+      filters,
+      runtimeRows,
+      candidateRows,
+      cardRows,
+      distillationRows,
+    });
+    const hasOverviewUniverse = overviewSessionIds !== null;
+    const runtimeRowsInOverview =
+      hasOverviewUniverse && overviewSessionIds
+        ? runtimeRows.filter((row) => overviewSessionIds.has(row.sessionId))
+        : runtimeRows;
+    const candidateRowsInOverview =
+      hasOverviewUniverse && overviewSessionIds
+        ? candidateRows.filter((row) => overviewSessionIds.has(row.candidate.sessionId))
+        : candidateRows;
+    const cardRowsInOverview =
+      hasOverviewUniverse && overviewSessionIds
+        ? cardRows.filter((row) => overviewSessionIds.has(row.card.sessionId))
+        : cardRows;
+    const distillationRowsInOverview =
+      hasOverviewUniverse && overviewSessionIds
+        ? distillationRows.filter((row) => overviewSessionIds.has(row.distillation.sessionId))
+        : distillationRows;
+
+    const now = Date.now();
+    const lastUpdatedAt = runtimeRowsInOverview.reduce(
+      (max, row) => Math.max(max, row.updatedAt),
+      0
+    );
+    const activeRuntimeRows = runtimeRowsInOverview.filter(
+      (row) =>
+        row.endedAt === null &&
+        ['active', 'idle', 'distilling'].includes(row.status) &&
+        now - row.updatedAt <= DatabaseService.ACTIVE_RUNTIME_FRESHNESS_MS
+    );
+    const activeTaskCount = new Set(activeRuntimeRows.map((row) => row.taskId)).size;
+    const tokenInput = runtimeRowsInOverview.reduce((sum, row) => sum + (row.inputTokens ?? 0), 0);
+    const tokenOutput = runtimeRowsInOverview.reduce(
+      (sum, row) => sum + (row.outputTokens ?? 0),
+      0
+    );
+    const tokenUsageTotal = runtimeRowsInOverview.reduce((sum, row) => {
+      const usage = this.parseJson<Record<string, unknown> | null>(row.usageMetadataJson, null);
+      const totalTokens = typeof usage?.totalTokens === 'number' ? usage.totalTokens : 0;
+      return sum + totalTokens;
+    }, 0);
+    const agentActiveDurationMs = runtimeRowsInOverview.reduce(
+      (sum, row) => sum + (row.activeDurationMs ?? 0),
+      0
+    );
+
+    return {
+      overviewStats: {
+        totalSessions: runtimeRowsInOverview.length,
+        activeSessions: activeRuntimeRows.length,
+        idleSessions: activeRuntimeRows.filter((row) => row.status === 'idle').length,
+        distillingSessions: activeRuntimeRows.filter((row) => row.status === 'distilling').length,
+        distilledSessions: runtimeRowsInOverview.filter((row) => row.status === 'distilled').length,
+        failedSessions: runtimeRowsInOverview.filter((row) => row.status === 'distill_failed')
+          .length,
+        lastUpdatedAt: lastUpdatedAt || now,
+      },
+      activeTaskCount,
+      sessionSummaryCount: runtimeRowsInOverview.length,
+      candidateCount: candidateRowsInOverview.length,
+      cardCount: cardRowsInOverview.length,
+      candidateStatusCounts: {
+        new: candidateRowsInOverview.filter((row) => row.candidate.status === 'new').length,
+        reviewed: candidateRowsInOverview.filter((row) => row.candidate.status === 'reviewed')
+          .length,
+        promoted: candidateRowsInOverview.filter((row) => row.candidate.status === 'promoted')
+          .length,
+        rejected: candidateRowsInOverview.filter((row) => row.candidate.status === 'rejected')
+          .length,
+        archived: candidateRowsInOverview.filter((row) => row.candidate.status === 'archived')
+          .length,
+      },
+      cardStatusCounts: {
+        active: cardRowsInOverview.filter((row) => row.card.status === 'active').length,
+        archived: cardRowsInOverview.filter((row) => row.card.status === 'archived').length,
+      },
+      distillationStatusCounts: {
+        queued: distillationRowsInOverview.filter((row) => row.distillation.status === 'queued')
+          .length,
+        running: distillationRowsInOverview.filter((row) => row.distillation.status === 'running')
+          .length,
+        succeeded: distillationRowsInOverview.filter(
+          (row) => row.distillation.status === 'succeeded'
+        ).length,
+        failed: distillationRowsInOverview.filter((row) => row.distillation.status === 'failed')
+          .length,
+        skipped: distillationRowsInOverview.filter((row) => row.distillation.status === 'skipped')
+          .length,
+      },
+      tokenUsageTotal: tokenUsageTotal > 0 ? tokenUsageTotal : null,
+      tokenInput,
+      tokenOutput,
+      agentActiveDurationMs,
+      updatedAt: lastUpdatedAt || now,
+    };
+  }
+
   private computeBaseRef(
     preferred?: string | null,
     remote?: string | null,
@@ -925,6 +1641,412 @@ export class DatabaseService {
       timestamp: row.timestamp,
       metadata: row.metadata ?? undefined,
     };
+  }
+
+  private mapSessionRuntimeStatsRow(row: SessionRuntimeStatsRow): SessionRuntimeStatsRecord {
+    return {
+      id: row.id,
+      taskId: row.taskId,
+      sessionId: row.sessionId,
+      provider: row.provider ?? null,
+      status: row.status as SessionLifecycleState,
+      startedAt: row.startedAt,
+      endedAt: row.endedAt ?? null,
+      activeDurationMs: row.activeDurationMs,
+      idleDurationMs: row.idleDurationMs,
+      inputTokens: row.inputTokens,
+      outputTokens: row.outputTokens,
+      usageMetadata: this.parseJson<Record<string, unknown> | null>(row.usageMetadataJson, null),
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
+  }
+
+  private mapSessionDistillationRow(row: SessionDistillationRow): SessionDistillationRecord {
+    return {
+      id: row.id,
+      taskId: row.taskId,
+      sessionId: row.sessionId,
+      provider: row.provider ?? null,
+      status: row.status as DistillationStatus,
+      promptVersion: row.promptVersion ?? null,
+      startedAt: row.startedAt,
+      updatedAt: row.updatedAt,
+      finishedAt: row.finishedAt ?? null,
+      errorMessage: row.errorMessage ?? null,
+      rawResponse: row.rawResponse ?? null,
+      summaryMarkdown: row.summaryMarkdown ?? null,
+      finalConclusion: row.finalConclusion ?? null,
+      evidenceRefs: this.parseJson<KnowledgeEvidenceRef[]>(row.evidenceRefsJson, []),
+      createdAt: row.createdAt,
+    };
+  }
+
+  private mapKnowledgeCandidateRow(row: KnowledgeCandidateRow): KnowledgeCandidateRecord {
+    return {
+      id: row.id,
+      taskId: row.taskId,
+      sessionId: row.sessionId,
+      distillationId: row.distillationId ?? null,
+      status: row.status as KnowledgeCandidateStatus,
+      title: row.title,
+      cardKind: row.cardKind,
+      summary: row.summary,
+      bodyMarkdown: row.bodyMarkdown ?? null,
+      sourceCount: row.sourceCount,
+      confidence: row.confidence ?? null,
+      evidenceRefs: this.parseJson<KnowledgeEvidenceRef[]>(row.evidenceRefsJson, []),
+      tags: this.parseJson<string[]>(row.tagsJson, []),
+      reviewedAt: row.reviewedAt ?? null,
+      reviewedBy: row.reviewedBy ?? null,
+      promotedCardId: row.promotedCardId ?? null,
+      archivedAt: row.archivedAt ?? null,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
+  }
+
+  private mapKnowledgeCardRow(row: KnowledgeCardRow): KnowledgeCardRecord {
+    return {
+      id: row.id,
+      candidateId: row.candidateId ?? null,
+      taskId: row.taskId,
+      sessionId: row.sessionId,
+      status: row.status as KnowledgeCardStatus,
+      title: row.title,
+      cardKind: row.cardKind,
+      summary: row.summary,
+      content: row.content,
+      sessionIds: row.sessionId ? [row.sessionId] : [],
+      evidenceRefs: this.parseJson<KnowledgeEvidenceRef[]>(row.evidenceRefsJson, []),
+      tags: this.parseJson<string[]>(row.tagsJson, []),
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+      archivedAt: row.archivedAt ?? null,
+    };
+  }
+
+  private async getSessionDistillationById(
+    distillationId: string
+  ): Promise<SessionDistillationRecord | null> {
+    const { db } = await getDrizzleClient();
+    const rows = await db
+      .select()
+      .from(sessionDistillationsTable)
+      .where(eq(sessionDistillationsTable.id, distillationId))
+      .limit(1);
+    return rows[0] ? this.mapSessionDistillationRow(rows[0]) : null;
+  }
+
+  private async getKnowledgeCardById(cardId: string): Promise<KnowledgeCardRecord | null> {
+    const { db } = await getDrizzleClient();
+    const rows = await db
+      .select()
+      .from(knowledgeCardsTable)
+      .where(eq(knowledgeCardsTable.id, cardId))
+      .limit(1);
+    return rows[0] ? this.mapKnowledgeCardRow(rows[0]) : null;
+  }
+
+  private async getKnowledgeCandidateById(
+    candidateId: string
+  ): Promise<KnowledgeCandidateRecord | null> {
+    const { db } = await getDrizzleClient();
+    const rows = await db
+      .select()
+      .from(knowledgeCandidatesTable)
+      .where(eq(knowledgeCandidatesTable.id, candidateId))
+      .limit(1);
+    return rows[0] ? this.mapKnowledgeCandidateRow(rows[0]) : null;
+  }
+
+  private isLegacyChatRuntimeTaskScopeMismatch(
+    existingTaskId: string,
+    stats: SessionRuntimeStatsRecord
+  ): boolean {
+    const parsed = parsePtyId(stats.sessionId);
+    if (!parsed || parsed.kind !== 'chat') {
+      return false;
+    }
+
+    return existingTaskId === parsed.suffix;
+  }
+
+  private assertTaskSessionScopeMatches(args: {
+    context: string;
+    expectedTaskId: string;
+    expectedSessionId: string;
+    actualTaskId: string;
+    actualSessionId: string;
+  }): void {
+    if (
+      args.expectedTaskId === args.actualTaskId &&
+      args.expectedSessionId === args.actualSessionId
+    ) {
+      return;
+    }
+
+    throw new Error(
+      `${args.context} must use the same taskId/sessionId. Expected ${args.expectedTaskId}/${args.expectedSessionId}, received ${args.actualTaskId}/${args.actualSessionId}.`
+    );
+  }
+
+  private async assertDistillationScopeIsStable(
+    distillation: SessionDistillationUpsert
+  ): Promise<void> {
+    const existing = await this.getSessionDistillationById(distillation.id);
+    if (!existing) return;
+
+    this.assertTaskSessionScopeMatches({
+      context: `Session distillation ${distillation.id}`,
+      expectedTaskId: existing.taskId,
+      expectedSessionId: existing.sessionId,
+      actualTaskId: distillation.taskId,
+      actualSessionId: distillation.sessionId,
+    });
+  }
+
+  private async assertKnowledgeCandidateLinksConsistent(
+    candidates: KnowledgeCandidateInput[]
+  ): Promise<void> {
+    for (const candidate of candidates) {
+      if (candidate.distillationId) {
+        const distillation = await this.getSessionDistillationById(candidate.distillationId);
+        if (!distillation) {
+          throw new Error(
+            `Knowledge candidate ${candidate.id} references missing distillation ${candidate.distillationId}.`
+          );
+        }
+
+        this.assertTaskSessionScopeMatches({
+          context: `Knowledge candidate ${candidate.id} -> distillation ${candidate.distillationId}`,
+          expectedTaskId: distillation.taskId,
+          expectedSessionId: distillation.sessionId,
+          actualTaskId: candidate.taskId,
+          actualSessionId: candidate.sessionId,
+        });
+      }
+
+      if (candidate.promotedCardId) {
+        const promotedCard = await this.getKnowledgeCardById(candidate.promotedCardId);
+        if (!promotedCard) {
+          throw new Error(
+            `Knowledge candidate ${candidate.id} references missing promoted card ${candidate.promotedCardId}.`
+          );
+        }
+
+        this.assertTaskSessionScopeMatches({
+          context: `Knowledge candidate ${candidate.id} -> promoted card ${candidate.promotedCardId}`,
+          expectedTaskId: promotedCard.taskId,
+          expectedSessionId: promotedCard.sessionId,
+          actualTaskId: candidate.taskId,
+          actualSessionId: candidate.sessionId,
+        });
+
+        if (promotedCard.candidateId && promotedCard.candidateId !== candidate.id) {
+          throw new Error(
+            `Knowledge candidate ${candidate.id} references promoted card ${candidate.promotedCardId} that is already linked to candidate ${promotedCard.candidateId}.`
+          );
+        }
+      }
+    }
+  }
+
+  private async assertKnowledgePromotionConsistent(args: {
+    candidateId: string;
+    card: KnowledgeCardInput;
+  }): Promise<KnowledgeCandidateRecord> {
+    const candidate = await this.getKnowledgeCandidateById(args.candidateId);
+    if (!candidate) {
+      throw new Error(`Knowledge candidate ${args.candidateId} not found.`);
+    }
+
+    if (args.card.candidateId && args.card.candidateId !== args.candidateId) {
+      throw new Error(
+        `Knowledge card ${args.card.id} candidateId ${args.card.candidateId} does not match promoted candidate ${args.candidateId}.`
+      );
+    }
+
+    this.assertTaskSessionScopeMatches({
+      context: `Knowledge candidate ${args.candidateId} -> card ${args.card.id}`,
+      expectedTaskId: candidate.taskId,
+      expectedSessionId: candidate.sessionId,
+      actualTaskId: args.card.taskId,
+      actualSessionId: args.card.sessionId,
+    });
+
+    const existingCard = await this.getKnowledgeCardById(args.card.id);
+    if (!existingCard) {
+      return candidate;
+    }
+
+    this.assertTaskSessionScopeMatches({
+      context: `Existing knowledge card ${args.card.id}`,
+      expectedTaskId: existingCard.taskId,
+      expectedSessionId: existingCard.sessionId,
+      actualTaskId: candidate.taskId,
+      actualSessionId: candidate.sessionId,
+    });
+
+    if (existingCard.candidateId && existingCard.candidateId !== args.candidateId) {
+      throw new Error(
+        `Knowledge card ${args.card.id} is already linked to candidate ${existingCard.candidateId}.`
+      );
+    }
+
+    return candidate;
+  }
+
+  private async updateKnowledgeCandidateStatus(
+    candidateId: string,
+    status: KnowledgeCandidateStatus,
+    options: {
+      reviewedBy?: string | null;
+      reviewedAt?: number | null;
+      archivedAt?: number | null;
+    } = {}
+  ): Promise<KnowledgeCandidateRecord | null> {
+    if (this.disabled) return null;
+    const { db } = await getDrizzleClient();
+    await db
+      .update(knowledgeCandidatesTable)
+      .set({
+        status,
+        reviewedBy:
+          options.reviewedBy === undefined
+            ? sql`${knowledgeCandidatesTable.reviewedBy}`
+            : options.reviewedBy,
+        reviewedAt:
+          options.reviewedAt === undefined
+            ? sql`${knowledgeCandidatesTable.reviewedAt}`
+            : options.reviewedAt,
+        archivedAt:
+          options.archivedAt === undefined
+            ? sql`${knowledgeCandidatesTable.archivedAt}`
+            : options.archivedAt,
+        updatedAt: Date.now(),
+      })
+      .where(eq(knowledgeCandidatesTable.id, candidateId));
+
+    return this.getKnowledgeCandidateById(candidateId);
+  }
+
+  private buildKnowledgeCandidatePredicates(filters: KnowledgeInboxFilters) {
+    const predicates = [];
+
+    if (filters.query?.trim()) {
+      const pattern = `%${filters.query.trim()}%`;
+      predicates.push(
+        or(
+          like(knowledgeCandidatesTable.title, pattern),
+          like(knowledgeCandidatesTable.summary, pattern),
+          like(knowledgeCandidatesTable.bodyMarkdown, pattern)
+        )!
+      );
+    }
+    if (filters.candidateStatuses && filters.candidateStatuses.length > 0) {
+      predicates.push(inArray(knowledgeCandidatesTable.status, filters.candidateStatuses));
+    }
+    if (filters.sessionStates && filters.sessionStates.length > 0) {
+      predicates.push(inArray(sessionRuntimeStatsTable.status, filters.sessionStates));
+    }
+    if (filters.distillationStatuses && filters.distillationStatuses.length > 0) {
+      predicates.push(inArray(sessionDistillationsTable.status, filters.distillationStatuses));
+    }
+
+    return predicates;
+  }
+
+  private buildKnowledgeSessionPredicates(filters: KnowledgeInboxFilters) {
+    const predicates = [];
+
+    if (filters.sessionStates && filters.sessionStates.length > 0) {
+      predicates.push(inArray(sessionRuntimeStatsTable.status, filters.sessionStates));
+    }
+
+    return predicates;
+  }
+
+  private buildKnowledgeDistillationPredicates(filters: KnowledgeInboxFilters) {
+    const predicates = this.buildKnowledgeSessionPredicates(filters);
+
+    if (filters.distillationStatuses && filters.distillationStatuses.length > 0) {
+      predicates.push(inArray(sessionDistillationsTable.status, filters.distillationStatuses));
+    }
+
+    return predicates;
+  }
+
+  private buildKnowledgeCardOverviewPredicates(filters: KnowledgeInboxFilters) {
+    const predicates = this.buildKnowledgeSessionPredicates(filters);
+
+    if (filters.query?.trim()) {
+      const pattern = `%${filters.query.trim()}%`;
+      predicates.push(
+        or(
+          like(knowledgeCardsTable.title, pattern),
+          like(knowledgeCardsTable.summary, pattern),
+          like(knowledgeCardsTable.content, pattern)
+        )!
+      );
+    }
+
+    return predicates;
+  }
+
+  private buildKnowledgeOverviewSessionUniverse(args: {
+    filters: KnowledgeInboxFilters;
+    runtimeRows: SessionRuntimeStatsRow[];
+    candidateRows: Array<{ candidate: KnowledgeCandidateRow }>;
+    cardRows: Array<{ card: KnowledgeCardRow }>;
+    distillationRows: Array<{ distillation: SessionDistillationRow }>;
+  }): Set<string> | null {
+    const { filters, runtimeRows, candidateRows, cardRows, distillationRows } = args;
+    const universes: Set<string>[] = [];
+
+    if (filters.query?.trim()) {
+      universes.push(
+        new Set([
+          ...candidateRows.map((row) => row.candidate.sessionId),
+          ...cardRows.map((row) => row.card.sessionId),
+        ])
+      );
+    }
+
+    if (filters.candidateStatuses && filters.candidateStatuses.length > 0) {
+      universes.push(new Set(candidateRows.map((row) => row.candidate.sessionId)));
+    }
+
+    if (filters.distillationStatuses && filters.distillationStatuses.length > 0) {
+      universes.push(new Set(distillationRows.map((row) => row.distillation.sessionId)));
+    }
+
+    if (filters.sessionStates && filters.sessionStates.length > 0) {
+      universes.push(new Set(runtimeRows.map((row) => row.sessionId)));
+    }
+
+    if (universes.length === 0) {
+      return null;
+    }
+
+    const [firstUniverse, ...restUniverses] = universes;
+    return restUniverses.reduce((currentUniverse, nextUniverse) => {
+      return new Set([...currentUniverse].filter((sessionId) => nextUniverse.has(sessionId)));
+    }, firstUniverse);
+  }
+
+  private stringifyJson(value: unknown): string | null {
+    if (value === null || value === undefined) return null;
+    return JSON.stringify(value);
+  }
+
+  private parseJson<T>(serialized: string | null, fallback: T): T {
+    if (!serialized) return fallback;
+    try {
+      return JSON.parse(serialized) as T;
+    } catch {
+      return fallback;
+    }
   }
 
   private parseTaskMetadata(serialized: string, taskId: string): any {
@@ -1071,6 +2193,16 @@ export class DatabaseService {
         appliedCount += 1;
       }
 
+      const standaloneMigrations = await this.loadStandaloneSqlMigrations(migrationsPath, applied);
+      for (const migration of standaloneMigrations) {
+        await this.execSql(migration.contents);
+        await this.execSql(
+          `INSERT INTO "__drizzle_migrations" ("hash", "created_at") VALUES('${migration.hash}', '${migration.createdAt}')`
+        );
+        applied.add(migration.hash);
+        appliedCount += 1;
+      }
+
       this.lastMigrationSummary = {
         appliedCount,
         totalMigrations: migrations.length,
@@ -1097,6 +2229,34 @@ export class DatabaseService {
     }
     if (!(await this.tableHasColumn('conversations', 'task_id'))) {
       missingInvariants.push('conversations.task_id');
+    }
+
+    if (!(await this.tableExists('session_runtime_stats'))) {
+      missingInvariants.push('session_runtime_stats table');
+      missingInvariants.push('session_runtime_stats.session_id');
+    } else if (!(await this.tableHasColumn('session_runtime_stats', 'session_id'))) {
+      missingInvariants.push('session_runtime_stats.session_id');
+    }
+
+    if (!(await this.tableExists('session_distillations'))) {
+      missingInvariants.push('session_distillations table');
+      missingInvariants.push('session_distillations.status');
+    } else if (!(await this.tableHasColumn('session_distillations', 'status'))) {
+      missingInvariants.push('session_distillations.status');
+    }
+
+    if (!(await this.tableExists('knowledge_candidates'))) {
+      missingInvariants.push('knowledge_candidates table');
+      missingInvariants.push('knowledge_candidates.card_kind');
+    } else if (!(await this.tableHasColumn('knowledge_candidates', 'card_kind'))) {
+      missingInvariants.push('knowledge_candidates.card_kind');
+    }
+
+    if (!(await this.tableExists('knowledge_cards'))) {
+      missingInvariants.push('knowledge_cards table');
+      missingInvariants.push('knowledge_cards.status');
+    } else if (!(await this.tableHasColumn('knowledge_cards', 'status'))) {
+      missingInvariants.push('knowledge_cards.status');
     }
 
     if (missingInvariants.length > 0) {
@@ -1169,6 +2329,46 @@ export class DatabaseService {
       `INSERT INTO "__drizzle_migrations" ("hash", "created_at") VALUES('${hash}', '${createdAt}')`
     );
     applied.add(hash);
+  }
+
+  private async loadStandaloneSqlMigrations(
+    migrationsFolder: string,
+    applied: Set<string>
+  ): Promise<Array<{ hash: string; createdAt: number; contents: string }>> {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const fs = require('node:fs');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const path = require('node:path');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const crypto = require('node:crypto');
+
+    const tagByWhen = await this.tryLoadMigrationTagByWhen(migrationsFolder);
+    const journalTags = new Set(Array.from(tagByWhen?.values() ?? []));
+
+    const entries = fs
+      .readdirSync(migrationsFolder, { withFileTypes: true })
+      .filter((entry: { isFile: () => boolean; name: string }) => entry.isFile())
+      .map((entry: { name: string }) => entry.name)
+      .filter((name: string) => /^\d+_.*\.sql$/.test(name))
+      .filter((name: string) => !journalTags.has(name.replace(/\.sql$/, '')))
+      .sort((a: string, b: string) => a.localeCompare(b));
+
+    const pending: Array<{ hash: string; createdAt: number; contents: string }> = [];
+    for (const name of entries) {
+      const fullPath = path.join(migrationsFolder, name);
+      const contents = fs.readFileSync(fullPath, 'utf8');
+      const hash = crypto.createHash('sha256').update(contents).digest('hex');
+      if (applied.has(hash)) continue;
+
+      const prefix = Number.parseInt(name.split('_', 1)[0] ?? '', 10);
+      pending.push({
+        hash,
+        createdAt: Number.isFinite(prefix) ? prefix : Date.now(),
+        contents,
+      });
+    }
+
+    return pending;
   }
 
   private async tableExists(name: string): Promise<boolean> {

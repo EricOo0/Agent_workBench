@@ -35,12 +35,14 @@ import { activityStore } from '@/lib/activityStore';
 import { agentStatusStore } from '@/lib/agentStatusStore';
 import { handleMenuUndo, handleMenuRedo } from '@/lib/menuUndoRedo';
 import { rpc } from '@/lib/rpc';
+import { getKnowledgeTaskIdFromSessionId } from '@/lib/knowledgeSessionRouting';
 import { soundPlayer } from '@/lib/soundPlayer';
 import BrowserProvider, { useBrowser } from '@/providers/BrowserProvider';
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { SettingsPageTab } from '@/components/SettingsPage';
 const PANEL_RESIZE_DRAGGING_EVENT = 'emdash:panel-resize-dragging';
 type ResizeHandleId = 'left' | 'right';
+type KnowledgeRoute = 'overview' | 'inbox' | 'library' | 'home' | 'skills' | 'mcp' | null;
 
 const RightSidebarBridge: React.FC<{
   onCollapsedChange: (collapsed: boolean) => void;
@@ -105,6 +107,11 @@ export function Workspace() {
   const [showSettingsPage, setShowSettingsPage] = useState(false);
   const [settingsPageInitialTab, setSettingsPageInitialTab] = useState<SettingsPageTab>('general');
   const [showCommandPalette, setShowCommandPalette] = useState(false);
+  const [showKnowledgeOverview, setShowKnowledgeOverview] = useState(false);
+  const [showKnowledgeInbox, setShowKnowledgeInbox] = useState(false);
+  const [showKnowledgeLibrary, setShowKnowledgeLibrary] = useState(false);
+  const [knowledgeInboxSessionId, setKnowledgeInboxSessionId] = useState<string | null>(null);
+  const knowledgeBackTargetRef = useRef<KnowledgeRoute>(null);
 
   const openSettingsPage = useCallback((tab: SettingsPageTab = 'general') => {
     setSettingsPageInitialTab(tab);
@@ -180,6 +187,127 @@ export function Workspace() {
   // --- Project management (provided by ProjectManagementProvider in App.tsx) ---
   const projectMgmt = useProjectManagementContext();
   const { showEditorMode, setShowEditorMode, setShowKanban } = projectMgmt;
+  const getCurrentKnowledgeBackTarget = useCallback((): KnowledgeRoute => {
+    if (projectMgmt.showMcpView) return 'mcp';
+    if (projectMgmt.showSkillsView) return 'skills';
+    if (projectMgmt.showHomeView) return 'home';
+    return null;
+  }, [projectMgmt.showHomeView, projectMgmt.showMcpView, projectMgmt.showSkillsView]);
+
+  const restoreKnowledgeBackTarget = useCallback(
+    (target: KnowledgeRoute) => {
+      projectMgmt.setShowHomeView(target === 'home');
+      projectMgmt.setShowSkillsView(target === 'skills');
+      projectMgmt.setShowMcpView(target === 'mcp');
+    },
+    [projectMgmt]
+  );
+  const dismissKnowledgeViews = useCallback(
+    (options?: { restoreTarget?: boolean }) => {
+      const restoreTarget = options?.restoreTarget ?? false;
+      setShowKnowledgeOverview(false);
+      setShowKnowledgeInbox(false);
+      setShowKnowledgeLibrary(false);
+      setKnowledgeInboxSessionId(null);
+      if (restoreTarget) {
+        restoreKnowledgeBackTarget(knowledgeBackTargetRef.current);
+      } else {
+        knowledgeBackTargetRef.current = null;
+      }
+    },
+    [restoreKnowledgeBackTarget]
+  );
+  const handleCloseKnowledgeOverview = useCallback(() => {
+    dismissKnowledgeViews({ restoreTarget: true });
+  }, [dismissKnowledgeViews]);
+  const handleCloseKnowledgeInbox = useCallback(() => {
+    const shouldReturnToOverview = knowledgeBackTargetRef.current === 'overview';
+    if (!shouldReturnToOverview) {
+      dismissKnowledgeViews({ restoreTarget: true });
+      return;
+    }
+    setShowKnowledgeOverview(shouldReturnToOverview);
+    setShowKnowledgeInbox(false);
+    setKnowledgeInboxSessionId(null);
+  }, [dismissKnowledgeViews]);
+  const handleCloseKnowledgeLibrary = useCallback(() => {
+    const shouldReturnToOverview = knowledgeBackTargetRef.current === 'overview';
+    if (!shouldReturnToOverview) {
+      dismissKnowledgeViews({ restoreTarget: true });
+      return;
+    }
+    setShowKnowledgeOverview(shouldReturnToOverview);
+    setShowKnowledgeLibrary(false);
+  }, [dismissKnowledgeViews]);
+  const handleOpenKnowledgeInbox = useCallback(
+    (sessionId?: string | null, options?: { backTarget?: KnowledgeRoute }) => {
+      knowledgeBackTargetRef.current = options?.backTarget ?? getCurrentKnowledgeBackTarget();
+      setKnowledgeInboxSessionId(sessionId ?? null);
+      setShowKnowledgeOverview(false);
+      setShowKnowledgeInbox(true);
+      setShowKnowledgeLibrary(false);
+      projectMgmt.setShowHomeView(false);
+      projectMgmt.setShowSkillsView(false);
+      projectMgmt.setShowMcpView(false);
+      setShowKanban(false);
+      setShowEditorMode(false);
+      setShowDiffViewer(false);
+      handleCloseSettingsPage();
+      handleCloseCommandPalette();
+    },
+    [
+      getCurrentKnowledgeBackTarget,
+      handleCloseCommandPalette,
+      handleCloseSettingsPage,
+      projectMgmt,
+      setShowEditorMode,
+      setShowKanban,
+    ]
+  );
+  const handleOpenKnowledgeLibrary = useCallback(() => {
+    knowledgeBackTargetRef.current = getCurrentKnowledgeBackTarget();
+    setShowKnowledgeLibrary(true);
+    setShowKnowledgeOverview(false);
+    setShowKnowledgeInbox(false);
+    setKnowledgeInboxSessionId(null);
+    projectMgmt.setShowHomeView(false);
+    projectMgmt.setShowSkillsView(false);
+    projectMgmt.setShowMcpView(false);
+    setShowKanban(false);
+    setShowEditorMode(false);
+    setShowDiffViewer(false);
+    handleCloseSettingsPage();
+    handleCloseCommandPalette();
+  }, [
+    getCurrentKnowledgeBackTarget,
+    handleCloseCommandPalette,
+    handleCloseSettingsPage,
+    projectMgmt,
+    setShowEditorMode,
+    setShowKanban,
+  ]);
+  const handleOpenKnowledgeOverview = useCallback(() => {
+    knowledgeBackTargetRef.current = getCurrentKnowledgeBackTarget();
+    setShowKnowledgeOverview(true);
+    setShowKnowledgeInbox(false);
+    setShowKnowledgeLibrary(false);
+    setKnowledgeInboxSessionId(null);
+    projectMgmt.setShowHomeView(false);
+    projectMgmt.setShowSkillsView(false);
+    projectMgmt.setShowMcpView(false);
+    setShowKanban(false);
+    setShowEditorMode(false);
+    setShowDiffViewer(false);
+    handleCloseSettingsPage();
+    handleCloseCommandPalette();
+  }, [
+    getCurrentKnowledgeBackTarget,
+    handleCloseCommandPalette,
+    handleCloseSettingsPage,
+    projectMgmt,
+    setShowEditorMode,
+    setShowKanban,
+  ]);
 
   // Listen for native menu "Settings" click (main → renderer)
   useEffect(() => {
@@ -189,20 +317,138 @@ export function Workspace() {
     return () => cleanup?.();
   }, [openSettingsPage]);
 
+  useEffect(() => {
+    const handleOpenSettingsTabEvent = (event: Event) => {
+      const detail = (event as CustomEvent<{ tab?: SettingsPageTab }>).detail;
+      openSettingsPage(detail?.tab ?? 'general');
+    };
+    window.addEventListener(
+      'emdash:open-settings-tab',
+      handleOpenSettingsTabEvent as EventListener
+    );
+    return () => {
+      window.removeEventListener(
+        'emdash:open-settings-tab',
+        handleOpenSettingsTabEvent as EventListener
+      );
+    };
+  }, [openSettingsPage]);
+
+  useEffect(() => {
+    const handleOpenInboxEvent = (event: Event) => {
+      const detail = (event as CustomEvent<{ sessionId?: string | null }>).detail;
+      handleOpenKnowledgeInbox(detail?.sessionId ?? null);
+    };
+    window.addEventListener('emdash:open-knowledge-inbox', handleOpenInboxEvent as EventListener);
+    return () => {
+      window.removeEventListener(
+        'emdash:open-knowledge-inbox',
+        handleOpenInboxEvent as EventListener
+      );
+    };
+  }, [handleOpenKnowledgeInbox]);
+
+  useEffect(() => {
+    const handleOpenLibraryEvent = () => {
+      handleOpenKnowledgeLibrary();
+    };
+    window.addEventListener(
+      'emdash:open-knowledge-library',
+      handleOpenLibraryEvent as EventListener
+    );
+    return () => {
+      window.removeEventListener(
+        'emdash:open-knowledge-library',
+        handleOpenLibraryEvent as EventListener
+      );
+    };
+  }, [handleOpenKnowledgeLibrary]);
+
+  useEffect(() => {
+    const handleOpenOverviewEvent = () => {
+      handleOpenKnowledgeOverview();
+    };
+    window.addEventListener(
+      'emdash:open-knowledge-overview',
+      handleOpenOverviewEvent as EventListener
+    );
+    return () => {
+      window.removeEventListener(
+        'emdash:open-knowledge-overview',
+        handleOpenOverviewEvent as EventListener
+      );
+    };
+  }, [handleOpenKnowledgeOverview]);
+
   const handleToggleKanban = useCallback(() => {
     if (!projectMgmt.selectedProject) return;
+    dismissKnowledgeViews();
     setShowEditorMode(false);
     setShowKanban((v) => !v);
-  }, [projectMgmt.selectedProject, setShowEditorMode, setShowKanban]);
+  }, [dismissKnowledgeViews, projectMgmt.selectedProject, setShowEditorMode, setShowKanban]);
   const handleToggleEditor = useCallback(() => {
+    dismissKnowledgeViews();
     setShowKanban(false);
     setShowEditorMode((v) => !v);
-  }, [setShowKanban, setShowEditorMode]);
+  }, [dismissKnowledgeViews, setShowKanban, setShowEditorMode]);
   const handleCloseEditor = useCallback(() => setShowEditorMode(false), [setShowEditorMode]);
   const handleCloseKanban = useCallback(() => setShowKanban(false), [setShowKanban]);
 
   // --- Task management ---
   const taskMgmt = useTaskManagementContext();
+
+  const handleOpenOverviewSession = useCallback(
+    (sessionId: string) => {
+      const taskId = getKnowledgeTaskIdFromSessionId(sessionId);
+      if (!taskId) {
+        handleOpenKnowledgeInbox(sessionId, { backTarget: 'overview' });
+        return;
+      }
+      const entry = taskMgmt.allTasks.find((item) => item.task.id === taskId);
+
+      if (!entry) {
+        handleOpenKnowledgeInbox(sessionId, { backTarget: 'overview' });
+        return;
+      }
+
+      if (!projectMgmt.selectedProject || projectMgmt.selectedProject.id !== entry.project.id) {
+        projectMgmt.activateProjectView(entry.project);
+      }
+
+      setShowKnowledgeOverview(false);
+      setShowKnowledgeInbox(false);
+      setShowKnowledgeLibrary(false);
+      setKnowledgeInboxSessionId(null);
+      setShowKanban(false);
+      setShowEditorMode(false);
+      handleCloseSettingsPage();
+      taskMgmt.handleSelectTask(entry.task);
+    },
+    [
+      handleCloseSettingsPage,
+      handleOpenKnowledgeInbox,
+      projectMgmt,
+      setShowEditorMode,
+      setShowKanban,
+      taskMgmt,
+    ]
+  );
+
+  const handleSidebarSelectProject = useCallback(
+    (project: import('@/types/app').Project) => {
+      dismissKnowledgeViews();
+      projectMgmt.handleSelectProject(project);
+    },
+    [dismissKnowledgeViews, projectMgmt]
+  );
+
+  const handleSidebarSelectTask = useCallback(
+    (task: import('@/types/app').Task) => {
+      dismissKnowledgeViews();
+      taskMgmt.handleSelectTask(task);
+    },
+    [dismissKnowledgeViews, taskMgmt]
+  );
 
   // Focus task when OS notification is clicked
   const notificationFocusRef = useRef({
@@ -227,13 +473,98 @@ export function Workspace() {
       if (!selectedProject || selectedProject.id !== project.id) {
         projectMgmt.activateProjectView(project);
       }
+      setShowKnowledgeOverview(false);
+      dismissKnowledgeViews();
       setShowKanban(false);
       setShowEditorMode(false);
       handleCloseSettingsPage();
       handleSelectTask(task);
     });
     return cleanup;
-  }, [projectMgmt.activateProjectView, handleCloseSettingsPage]);
+  }, [projectMgmt.activateProjectView, handleCloseSettingsPage, dismissKnowledgeViews]);
+
+  useEffect(() => {
+    if (projectMgmt.showHomeView || projectMgmt.showSkillsView || projectMgmt.showMcpView) {
+      dismissKnowledgeViews();
+    }
+  }, [
+    dismissKnowledgeViews,
+    projectMgmt.showHomeView,
+    projectMgmt.showMcpView,
+    projectMgmt.showSkillsView,
+  ]);
+
+  useEffect(() => {
+    if (!showKnowledgeOverview) return;
+    if (showSettingsPage || showDiffViewer || showEditorMode || projectMgmt.showKanban) {
+      handleCloseKnowledgeOverview();
+    }
+  }, [
+    handleCloseKnowledgeOverview,
+    projectMgmt.showKanban,
+    showDiffViewer,
+    showEditorMode,
+    showKnowledgeOverview,
+    showSettingsPage,
+  ]);
+
+  useEffect(() => {
+    if (!showKnowledgeInbox) return;
+    if (showSettingsPage || showDiffViewer || showEditorMode || projectMgmt.showKanban) {
+      handleCloseKnowledgeInbox();
+    }
+  }, [
+    handleCloseKnowledgeInbox,
+    projectMgmt.showKanban,
+    showDiffViewer,
+    showEditorMode,
+    showKnowledgeInbox,
+    showSettingsPage,
+  ]);
+
+  useEffect(() => {
+    if (!showKnowledgeLibrary) return;
+    if (showSettingsPage || showDiffViewer || showEditorMode || projectMgmt.showKanban) {
+      handleCloseKnowledgeLibrary();
+    }
+  }, [
+    handleCloseKnowledgeLibrary,
+    projectMgmt.showKanban,
+    showDiffViewer,
+    showEditorMode,
+    showKnowledgeLibrary,
+    showSettingsPage,
+  ]);
+
+  const previousSelectedProjectIdRef = useRef<string | null>(
+    projectMgmt.selectedProject?.id ?? null
+  );
+  useEffect(() => {
+    const previousProjectId = previousSelectedProjectIdRef.current;
+    const nextProjectId = projectMgmt.selectedProject?.id ?? null;
+    if (
+      showKnowledgeOverview &&
+      previousProjectId !== null &&
+      nextProjectId !== previousProjectId
+    ) {
+      handleCloseKnowledgeOverview();
+    }
+    if (showKnowledgeInbox && previousProjectId !== null && nextProjectId !== previousProjectId) {
+      handleCloseKnowledgeInbox();
+    }
+    if (showKnowledgeLibrary && previousProjectId !== null && nextProjectId !== previousProjectId) {
+      handleCloseKnowledgeLibrary();
+    }
+    previousSelectedProjectIdRef.current = nextProjectId;
+  }, [
+    handleCloseKnowledgeOverview,
+    handleCloseKnowledgeInbox,
+    handleCloseKnowledgeLibrary,
+    projectMgmt.selectedProject?.id,
+    showKnowledgeOverview,
+    showKnowledgeInbox,
+    showKnowledgeLibrary,
+  ]);
 
   // --- Panel layout ---
   const {
@@ -398,6 +729,14 @@ export function Workspace() {
                       onSidebarContextChange={handleSidebarContextChange}
                       onCloseSettingsPage={handleCloseSettingsPage}
                       onOpenAccountSettings={() => openSettingsPage('account')}
+                      onSelectProjectOverride={handleSidebarSelectProject}
+                      onSelectTaskOverride={handleSidebarSelectTask}
+                      showKnowledgeOverview={showKnowledgeOverview}
+                      showKnowledgeInbox={showKnowledgeInbox}
+                      showKnowledgeLibrary={showKnowledgeLibrary}
+                      onOpenKnowledgeOverview={handleOpenKnowledgeOverview}
+                      onOpenKnowledgeInbox={() => handleOpenKnowledgeInbox(null)}
+                      onOpenKnowledgeLibrary={handleOpenKnowledgeLibrary}
                     />
                   </ResizablePanel>
                   <ResizableHandle
@@ -431,6 +770,21 @@ export function Workspace() {
                       ) : (
                         <MainContentArea
                           showSettingsPage={showSettingsPage}
+                          showKnowledgeOverview={showKnowledgeOverview}
+                          showKnowledgeInbox={showKnowledgeInbox}
+                          showKnowledgeLibrary={showKnowledgeLibrary}
+                          knowledgeInboxSessionId={knowledgeInboxSessionId}
+                          onCloseKnowledgeOverview={handleCloseKnowledgeOverview}
+                          onCloseKnowledgeInbox={handleCloseKnowledgeInbox}
+                          onCloseKnowledgeLibrary={handleCloseKnowledgeLibrary}
+                          onOpenKnowledgeInboxFromOverview={(sessionId) =>
+                            handleOpenKnowledgeInbox(sessionId, { backTarget: 'overview' })
+                          }
+                          onOpenKnowledgeLibraryFromOverview={() => {
+                            knowledgeBackTargetRef.current = 'overview';
+                            handleOpenKnowledgeLibrary();
+                          }}
+                          onOpenKnowledgeSessionFromOverview={handleOpenOverviewSession}
                           settingsPageInitialTab={settingsPageInitialTab}
                           handleCloseSettingsPage={handleCloseSettingsPage}
                         />

@@ -19,6 +19,9 @@ import {
   Plus,
   FolderOpen,
   FolderClosed,
+  LayoutDashboard,
+  Inbox,
+  BookOpen,
   Puzzle,
   Plug,
   Archive,
@@ -64,6 +67,14 @@ interface LeftSidebarProps {
   }) => void;
   onCloseSettingsPage?: () => void;
   onOpenAccountSettings?: () => void;
+  onSelectProjectOverride?: (project: Project) => void;
+  onSelectTaskOverride?: (task: Task) => void;
+  showKnowledgeOverview?: boolean;
+  showKnowledgeInbox?: boolean;
+  showKnowledgeLibrary?: boolean;
+  onOpenKnowledgeOverview?: () => void;
+  onOpenKnowledgeInbox?: () => void;
+  onOpenKnowledgeLibrary?: () => void;
 }
 
 const isRemoteProject = (project: Project): boolean => {
@@ -206,6 +217,14 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   onSidebarContextChange,
   onCloseSettingsPage,
   onOpenAccountSettings,
+  onSelectProjectOverride,
+  onSelectTaskOverride,
+  showKnowledgeOverview = false,
+  showKnowledgeInbox = false,
+  showKnowledgeLibrary = false,
+  onOpenKnowledgeOverview,
+  onOpenKnowledgeInbox,
+  onOpenKnowledgeLibrary,
 }) => {
   const { open, isMobile, setOpen } = useSidebar();
   const { showModal } = useModalContext();
@@ -327,6 +346,28 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
     [onCloseSettingsPage]
   );
 
+  const handleProjectSelection = useCallback(
+    (project: Project) => {
+      if (onSelectProjectOverride) {
+        onSelectProjectOverride(project);
+        return;
+      }
+      onSelectProject(project);
+    },
+    [onSelectProject, onSelectProjectOverride]
+  );
+
+  const handleTaskSelection = useCallback(
+    (task: Task) => {
+      if (onSelectTaskOverride) {
+        onSelectTaskOverride(task);
+        return;
+      }
+      onSelectTask?.(task);
+    },
+    [onSelectTask, onSelectTaskOverride]
+  );
+
   useEffect(() => {
     const card = changelogCardRef.current;
     if (!card || !changelogNotification.isVisible || !changelogEntry) {
@@ -405,6 +446,60 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                 </SidebarMenuButton>
               </SidebarMenuItem>
             )}
+            {onOpenKnowledgeOverview && (
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  className={`min-w-0 ${showKnowledgeOverview ? 'bg-black/[0.06] dark:bg-white/[0.08]' : ''}`}
+                >
+                  <Button
+                    variant="ghost"
+                    onClick={() => handleNavigationWithCloseSettings(onOpenKnowledgeOverview)}
+                    aria-label="Overview"
+                    className="w-full justify-start"
+                  >
+                    <LayoutDashboard className="h-5 w-5 text-muted-foreground sm:h-4 sm:w-4" />
+                    <span className="text-sm font-medium">Overview</span>
+                  </Button>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            )}
+            {onOpenKnowledgeInbox && (
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  className={`min-w-0 ${showKnowledgeInbox ? 'bg-black/[0.06] dark:bg-white/[0.08]' : ''}`}
+                >
+                  <Button
+                    variant="ghost"
+                    onClick={() => handleNavigationWithCloseSettings(onOpenKnowledgeInbox)}
+                    aria-label="Inbox"
+                    className="w-full justify-start"
+                  >
+                    <Inbox className="h-5 w-5 text-muted-foreground sm:h-4 sm:w-4" />
+                    <span className="text-sm font-medium">Inbox</span>
+                  </Button>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            )}
+            {onOpenKnowledgeLibrary && (
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  className={`min-w-0 ${showKnowledgeLibrary ? 'bg-black/[0.06] dark:bg-white/[0.08]' : ''}`}
+                >
+                  <Button
+                    variant="ghost"
+                    onClick={() => handleNavigationWithCloseSettings(onOpenKnowledgeLibrary)}
+                    aria-label="Knowledge"
+                    className="w-full justify-start"
+                  >
+                    <BookOpen className="h-5 w-5 text-muted-foreground sm:h-4 sm:w-4" />
+                    <span className="text-sm font-medium">Knowledge</span>
+                  </Button>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            )}
           </SidebarMenu>
         </SidebarHeader>
         <SidebarContent className="relative flex min-h-0 flex-col overflow-hidden">
@@ -478,7 +573,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                                 whileTap={{ scale: 0.97 }}
                                 onClick={() =>
                                   handleNavigationWithCloseSettings(() =>
-                                    onSelectProject(typedProject)
+                                    handleProjectSelection(typedProject)
                                   )
                                 }
                               >
@@ -532,7 +627,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                                         whileTap={{ scale: 0.97 }}
                                         onClick={() =>
                                           handleNavigationWithCloseSettings(() =>
-                                            onSelectTask?.(typedTask)
+                                            handleTaskSelection(typedTask)
                                           )
                                         }
                                         className={`group/task min-w-0 rounded-md py-1.5 pl-1 pr-2 hover:bg-accent ${isActive ? 'bg-black/[0.06] dark:bg-white/[0.08]' : ''}`}

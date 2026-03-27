@@ -10,6 +10,7 @@ import {
   DEFAULT_REVIEW_PROMPT,
   type ReviewSettings,
 } from '@shared/reviewPreset';
+import { DEFAULT_KNOWLEDGE_DISTILLATION_PROMPT } from '@shared/knowledge/distillationPrompt';
 
 export type DeepPartial<T> = {
   [K in keyof T]?: NonNullable<T[K]> extends object
@@ -102,6 +103,9 @@ export interface AppSettings {
   };
   defaultProvider?: ProviderId;
   review?: ReviewSettings;
+  knowledge?: {
+    distillationPrompt: string;
+  };
   tasks?: {
     autoGenerateName: boolean;
     autoInferTaskNames: boolean;
@@ -168,6 +172,9 @@ const DEFAULT_SETTINGS: AppSettings = {
     enabled: false,
     agent: DEFAULT_REVIEW_AGENT,
     prompt: DEFAULT_REVIEW_PROMPT,
+  },
+  knowledge: {
+    distillationPrompt: DEFAULT_KNOWLEDGE_DISTILLATION_PROMPT,
   },
   tasks: {
     autoGenerateName: true,
@@ -442,6 +449,15 @@ export function normalizeSettings(input: AppSettings): AppSettings {
     enabled: Boolean(review?.enabled ?? DEFAULT_SETTINGS.review!.enabled),
     agent: reviewAgent,
     prompt: reviewPrompt,
+  };
+
+  const knowledge = (input as any)?.knowledge || {};
+  const distillationPrompt =
+    typeof knowledge?.distillationPrompt === 'string' && knowledge.distillationPrompt.trim()
+      ? knowledge.distillationPrompt.trim()
+      : DEFAULT_SETTINGS.knowledge!.distillationPrompt;
+  out.knowledge = {
+    distillationPrompt,
   };
 
   // Tasks

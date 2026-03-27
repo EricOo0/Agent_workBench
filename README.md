@@ -1,4 +1,10 @@
-<img alt="Overview workspace" src="./docs/public/media/overview.png" />
+<img alt="Agent WorkBench banner" src="https://github.com/user-attachments/assets/a2ecaf3c-9d84-40ca-9a8e-d4f612cc1c6f" />
+
+<div align="center">
+
+English | [简体中文](./README.zh-CN.md)
+
+</div>
 
 
 <div align="center" style="margin:24px 0;">
@@ -6,10 +12,10 @@
 <br />
 
 [![MIT License](https://img.shields.io/badge/License-MIT-555555.svg?labelColor=333333&color=666666)](./LICENSE.md)
-[![Downloads](https://img.shields.io/github/downloads/generalaction/emdash/total?labelColor=333333&color=666666)](https://github.com/generalaction/emdash/releases)
-[![GitHub Stars](https://img.shields.io/github/stars/generalaction/emdash?labelColor=333333&color=666666)](https://github.com/generalaction/emdash)
-[![Last Commit](https://img.shields.io/github/last-commit/generalaction/emdash?labelColor=333333&color=666666)](https://github.com/generalaction/emdash/commits/main)
-[![Commit Activity](https://img.shields.io/github/commit-activity/m/generalaction/emdash?labelColor=333333&color=666666)](https://github.com/generalaction/emdash/graphs/commit-activity)
+[![Downloads](https://img.shields.io/github/downloads/EricOo0/Agent_workBench/total?labelColor=333333&color=666666)](https://github.com/EricOo0/Agent_workBench/releases)
+[![GitHub Stars](https://img.shields.io/github/stars/EricOo0/Agent_workBench?labelColor=333333&color=666666)](https://github.com/EricOo0/Agent_workBench)
+[![Last Commit](https://img.shields.io/github/last-commit/EricOo0/Agent_workBench?labelColor=333333&color=666666)](https://github.com/EricOo0/Agent_workBench/commits/main)
+[![Commit Activity](https://img.shields.io/github/commit-activity/m/EricOo0/Agent_workBench?labelColor=333333&color=666666)](https://github.com/EricOo0/Agent_workBench/graphs/commit-activity)
 <br>
 [![Discord](https://img.shields.io/badge/Discord-join-%235462eb?labelColor=%235462eb&logo=discord&logoColor=%23f5f5f5)](https://discord.gg/f2fv7YxuR2)
 <a href="https://www.ycombinator.com"><img src="https://img.shields.io/badge/Y%20Combinator-W26-orange" alt="Y Combinator W26"></a>
@@ -17,13 +23,13 @@
 
 <br />
 
-  <a href="https://github.com/generalaction/emdash/releases" style="display:inline-block; margin-right:8px; text-decoration:none; outline:none; border:none;">
+  <a href="https://github.com/EricOo0/Agent_workBench/releases" style="display:inline-block; margin-right:8px; text-decoration:none; outline:none; border:none;">
     <img src="./docs/public/media/downloadforwindows.png" alt="Download for Windows" height="40">
   </a>
-  <a href="https://github.com/generalaction/emdash/releases" style="display:inline-block; margin-right:8px; text-decoration:none; outline:none; border:none;">
+  <a href="https://github.com/EricOo0/Agent_workBench/releases" style="display:inline-block; margin-right:8px; text-decoration:none; outline:none; border:none;">
     <img src="./docs/public/media/downloadformacos.png" alt="Download for macOS" height="40">
   </a>
-  <a href="https://github.com/generalaction/emdash/releases" style="display:inline-block; text-decoration:none; outline:none; border:none;">
+  <a href="https://github.com/EricOo0/Agent_workBench/releases" style="display:inline-block; text-decoration:none; outline:none; border:none;">
     <img src="./docs/public/media/downloadforlinux.png" alt="Download for Linux" height="40">
   </a>
 
@@ -31,99 +37,79 @@
 
 <br />
 
-Emdash is a provider-agnostic desktop app that lets you run multiple coding agents in parallel, each isolated in its own git worktree, either locally or over SSH on a remote machine. We call it an Agentic Development Environment (ADE).
+Agent WorkBench is a desktop Agentic Development Environment focused on turning coding sessions into reusable engineering knowledge. It keeps the upstream multi-agent, multi-worktree workflow from Emdash, and adds a knowledge workbench layer on top so useful results do not disappear when a terminal session ends.
 
-Alongside task execution and diff review, this branch adds a more workflow-oriented surface around your daily agent context: an overview dashboard for navigating active work, an inbox for triaging surfaced items, and a knowledge library for revisiting promoted context without losing source traceability.
+This project is forked from [generalaction/emdash](https://github.com/generalaction/emdash). The fork keeps the original provider-agnostic ADE foundation and extends it with session summary distillation, knowledge candidate review, and knowledge reuse workflows tailored for long-running engineering work.
+
+Agent WorkBench supports the same upstream multi-agent terminal workflow: you can run multiple coding agents in parallel, isolate them in git worktrees, connect to remote machines over SSH, pass tickets into agents, review diffs, test changes, create PRs, and inspect CI/CD status.
+
+## Why This Fork
+
+This fork is opinionated about one thing: coding-agent output should become durable team knowledge instead of transient terminal history.
+
+### Highlights Added In This Fork
+
+- **Session summary distillation**
+  When a provider session exits, WorkBench can distill the session into a structured summary instead of leaving the outcome buried in terminal scrollback.
+- **Inbox review for candidate knowledge**
+  A single session can produce zero to multiple candidate knowledge cards. Low-value noise is filtered out, and higher-signal takeaways are reviewed in an Inbox before promotion.
+- **Knowledge library**
+  Promoted cards become a searchable library of reusable implementation patterns, debugging lessons, workflow guidance, and architectural decisions.
+- **Overview for activity and knowledge output**
+  Overview surfaces active sessions, active tasks, distillation output, promoted cards, and usage metrics to help track whether the workbench is producing useful knowledge.
+- **Editable distillation prompt**
+  The summary extraction prompt is configurable from the app, so teams can tune what “valuable knowledge” means for their own engineering context.
+
+### Upstream Foundation Retained
+
+This fork still builds on the upstream Emdash ADE foundation:
+
+- provider-agnostic CLI agent support
+- parallel agent workflows
+- git worktree isolation
+- diff review and PR flow
+- SSH-based remote development
 
 **Develop on remote servers via SSH**
 
-Connect to remote machines via SSH/SFTP to work with remote codebases. Emdash supports SSH agent and key authentication, with secure credential storage in your OS keychain. Run agents on remote projects using the same parallel workflow as local development. [Learn more](https://www.emdash.sh/cloud)
+Connect to remote machines via SSH/SFTP to work with remote codebases. Agent WorkBench supports SSH agent and key authentication, with secure credential storage in your OS keychain. Run agents on remote projects using the same parallel workflow as local development.
 
 <div align="center" style="margin:24px 0;">
 
-[Installation](#installation) • [Providers](#providers) • [Contributing](#contributing) • [FAQ](#faq)
+[Why This Fork](#why-this-fork) • [Installation](#installation) • [Contributing](#contributing) • [FAQ](#faq)
 
 </div>
 
-## Featured Workflow Surfaces
-
-<div align="center">
-  <img alt="Overview dashboard" src="./docs/public/media/overview.png" width="100%" />
-</div>
-
-<p><strong>Overview</strong> gives you a high-level entry point into active work so you can see status, jump to the right workspace, and keep parallel threads understandable.</p>
-
-<div align="center">
-  <img alt="Inbox triage" src="./docs/public/media/inbox.png" width="48%" />
-  <img alt="Knowledge library" src="./docs/public/media/knowledge.png" width="48%" />
-</div>
-
-<p><strong>Inbox</strong> helps you triage surfaced updates and pending items. <strong>Knowledge</strong> keeps promoted cards and source-linked context available for reuse, so important findings do not disappear into a single task thread.</p>
+<img alt="Agent WorkBench product" src="./docs/public/media/product.jpeg" />
 
 # Installation
 
 ### macOS
-- Apple Silicon: https://github.com/generalaction/emdash/releases/latest/download/emdash-arm64.dmg
-- Intel x64: https://github.com/generalaction/emdash/releases/latest/download/emdash-x64.dmg
+- Apple Silicon: https://github.com/EricOo0/Agent_workBench/releases/latest/download/agent-workbench-arm64.dmg
+- Intel x64: https://github.com/EricOo0/Agent_workBench/releases/latest/download/agent-workbench-x64.dmg
 
 [![Homebrew](https://img.shields.io/badge/-Homebrew-000000?style=for-the-badge&logo=homebrew&logoColor=FBB040)](https://formulae.brew.sh/cask/emdash)
-> macOS users can also: `brew install --cask emdash`
+> macOS users can also package locally from source using `pnpm run package:mac`
 
 ### Windows
-- Installer (x64): https://github.com/generalaction/emdash/releases/latest/download/emdash-x64.msi
-- Portable (x64): https://github.com/generalaction/emdash/releases/latest/download/emdash-x64.exe
+- Installer (x64): https://github.com/EricOo0/Agent_workBench/releases/latest/download/agent-workbench-x64.msi
+- Portable (x64): https://github.com/EricOo0/Agent_workBench/releases/latest/download/agent-workbench-x64.exe
 
 ### Linux
-- AppImage (x64): https://github.com/generalaction/emdash/releases/latest/download/emdash-x86_64.AppImage
-- Debian package (x64): https://github.com/generalaction/emdash/releases/latest/download/emdash-amd64.deb
+- AppImage (x64): https://github.com/EricOo0/Agent_workBench/releases/latest/download/agent-workbench-x86_64.AppImage
+- Debian package (x64): https://github.com/EricOo0/Agent_workBench/releases/latest/download/agent-workbench-amd64.deb
 
 ### Release Overview
 
-**[Latest Releases (macOS • Windows • Linux)](https://github.com/generalaction/emdash/releases/latest)**
+**[Latest Releases (macOS • Windows • Linux)](https://github.com/EricOo0/Agent_workBench/releases/latest)**
 
-# Providers
+# Upstream Capabilities
 
-<img alt="Providers banner" src="https://github.com/user-attachments/assets/c7b32a3e-452c-4209-91ef-71bcd895e2df" />
+This fork inherits the upstream provider matrix, integrations, and ADE workflow from Emdash.
+If you want the full provider list, installation matrix, and original product overview, see:
 
-### Supported CLI Providers
-
-Emdash currently supports 23 CLI providers, and we are adding new ones regularly. If you miss one, let us know or create a PR.
-
-| CLI Provider | Status | Install |
-| ----------- | ------ | ----------- |
-| [Amp](https://ampcode.com/manual#install) | ✅ Supported | <code>npm install -g @sourcegraph/amp@latest</code> |
-| [Auggie](https://docs.augmentcode.com/cli/overview) | ✅ Supported | <code>npm install -g @augmentcode/auggie</code> |
-| [Autohand Code](https://autohand.ai/code/) | ✅ Supported | <code>npm install -g autohand-cli</code> |
-| [Charm](https://github.com/charmbracelet/crush) | ✅ Supported | <code>npm install -g @charmland/crush</code> |
-| [Claude Code](https://docs.anthropic.com/claude/docs/claude-code) | ✅ Supported | <code>curl -fsSL https://claude.ai/install.sh &#124; bash</code> |
-| [Cline](https://docs.cline.bot/cline-cli/overview) | ✅ Supported | <code>npm install -g cline</code> |
-| [Codebuff](https://www.codebuff.com/docs/help/quick-start) | ✅ Supported | <code>npm install -g codebuff</code> |
-| [Codex](https://github.com/openai/codex) | ✅ Supported | <code>npm install -g @openai/codex</code> |
-| [Continue](https://docs.continue.dev/guides/cli) | ✅ Supported | <code>npm i -g @continuedev/cli</code> |
-| [Cursor](https://cursor.com/cli) | ✅ Supported | <code>curl https://cursor.com/install -fsS &#124; bash</code> |
-| [Droid](https://docs.factory.ai/cli/getting-started/quickstart) | ✅ Supported | <code>curl -fsSL https://app.factory.ai/cli &#124; sh</code> |
-| [Gemini](https://github.com/google-gemini/gemini-cli) | ✅ Supported | <code>npm install -g @google/gemini-cli</code> |
-| [GitHub Copilot](https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli) | ✅ Supported | <code>npm install -g @github/copilot</code> |
-| [Goose](https://block.github.io/goose/docs/quickstart/) | ✅ Supported | <code>curl -fsSL https://github.com/block/goose/releases/download/stable/download_cli.sh &#124; bash</code> |
-| [Hermes Agent](https://hermes-agent.nousresearch.com/docs/) | ✅ Supported | <code>curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh &#124; bash</code> |
-| [Kilocode](https://kilo.ai/docs/cli) | ✅ Supported | <code>npm install -g @kilocode/cli</code> |
-| [Kimi](https://www.kimi.com/code/docs/en/kimi-cli/guides/getting-started.html) | ✅ Supported | <code>uv tool install kimi-cli</code> |
-| [Kiro (AWS)](https://kiro.dev/docs/cli/) | ✅ Supported | <code>curl -fsSL https://cli.kiro.dev/install &#124; bash</code> |
-| [Mistral Vibe](https://github.com/mistralai/mistral-vibe) | ✅ Supported | <code>curl -LsSf https://mistral.ai/vibe/install.sh &#124; bash</code> |
-| [OpenCode](https://opencode.ai/docs/cli/) | ✅ Supported | <code>npm install -g opencode-ai</code> |
-| [Pi](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) | ✅ Supported | <code>npm install -g @mariozechner/pi-coding-agent</code> |
-| [Qwen Code](https://github.com/QwenLM/qwen-code) | ✅ Supported | <code>npm install -g @qwen-code/qwen-code</code> |
-| [Rovo Dev](https://support.atlassian.com/rovo/docs/install-and-run-rovo-dev-cli-on-your-device/) | ✅ Supported | <code>acli rovodev auth login</code> |
-
-### Issues
-
-Emdash allows you to pass tickets straight from Linear, GitHub, or Jira to your coding agent. 
-
-| Tool | Status | Authentication |
-| ----------- | ------ | ----------- |
-| [Linear](https://linear.app) | ✅ Supported | Connect with a Linear API key. |
-| [Jira](https://www.atlassian.com/software/jira) | ✅ Supported | Provide your site URL, email, and Atlassian API token. |
-| [GitHub Issues](https://docs.github.com/en/issues) | ✅ Supported | Authenticate via GitHub CLI (`gh auth login`). |
+- upstream repo: [generalaction/emdash](https://github.com/generalaction/emdash)
+- upstream docs: [docs.emdash.sh](https://docs.emdash.sh)
 
 # Contributing
 
@@ -160,7 +146,7 @@ Contributions welcome! See the [Contributing Guide](CONTRIBUTING.md) to get star
 > Linux:   ~/.config/emdash/emdash.db
 > ```
 >
-> **Privacy Note:** While Emdash itself stores data locally, **when you use any coding agent (Claude Code, Codex, Qwen, etc.), your code and prompts are sent to that provider's cloud API servers** for processing. Each provider has their own data handling and retention policies.
+> **Privacy Note:** While Agent WorkBench itself stores data locally, **when you use any coding agent (Claude Code, Codex, Qwen, etc.), your code and prompts are sent to that provider's cloud API servers** for processing. Each provider has their own data handling and retention policies.
 >
 > You can reset the local DB by deleting it (quit the app first). The file is recreated on next launch.
 </details>
@@ -168,7 +154,7 @@ Contributions welcome! See the [Contributing Guide](CONTRIBUTING.md) to get star
 <details>
 <summary><b>Do I need GitHub CLI?</b></summary>
 
-> **Only if you want GitHub features** (open PRs from Emdash, fetch repo info, GitHub Issues integration).  
+> **Only if you want GitHub features** (open PRs from Agent WorkBench, fetch repo info, GitHub Issues integration).  
 > Install & sign in:
 >
 > ```bash
@@ -181,7 +167,7 @@ Contributions welcome! See the [Contributing Guide](CONTRIBUTING.md) to get star
 <details>
 <summary><b>How do I add a new provider?</b></summary>
 
-> Emdash is **provider‑agnostic** and built to add CLIs quickly.
+> Agent WorkBench is **provider‑agnostic** and built to add CLIs quickly.
 >
 > - Open a PR following the **Contributing Guide** (`CONTRIBUTING.md`).
 > - Include: provider name, how it’s invoked (CLI command), auth notes, and minimal setup steps.
@@ -211,20 +197,20 @@ Contributions welcome! See the [Contributing Guide](CONTRIBUTING.md) to get star
 </details>
 
 <details>
-<summary><b>What permissions does Emdash need?</b></summary>
+<summary><b>What permissions does Agent WorkBench need?</b></summary>
 
 > - **Filesystem/Git:** to read/write your repo and create **Git worktrees** for isolation.  
 > - **Network:** only for provider CLIs you choose to use (e.g., Codex, Claude) and optional GitHub actions.  
 > - **Local DB:** to store your app state in SQLite on your machine.
 >
-> Emdash itself does **not** send your code or chats to any servers. Third‑party CLIs may transmit data per their policies.
+> Agent WorkBench itself does **not** send your code or chats to any servers. Third‑party CLIs may transmit data per their policies.
 </details>
 
 
 <details>
 <summary><b>Can I work with remote projects over SSH?</b></summary>
 
-> **Yes!** Emdash supports remote development via SSH.
+> **Yes!** Agent WorkBench supports remote development via SSH.
 >
 > **Setup:**
 > 1. Go to **Settings → SSH Connections** and add your server details

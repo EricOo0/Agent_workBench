@@ -83,11 +83,23 @@ describe('DatabaseService.initialize schema contract handling', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     delete process.env.EMDASH_DISABLE_NATIVE_DB;
-    schemaState.tables = new Set(['projects', 'tasks', 'conversations']);
+    schemaState.tables = new Set([
+      'projects',
+      'tasks',
+      'conversations',
+      'session_runtime_stats',
+      'session_distillations',
+      'knowledge_candidates',
+      'knowledge_cards',
+    ]);
     schemaState.columnsByTable = {
       projects: ['id', 'name', 'path', 'git_remote', 'git_branch'],
       conversations: ['id', 'task_id'],
       tasks: ['id', 'project_id', 'name'],
+      session_runtime_stats: ['id', 'task_id', 'session_id', 'status'],
+      session_distillations: ['id', 'task_id', 'session_id', 'status'],
+      knowledge_candidates: ['id', 'task_id', 'session_id', 'card_kind'],
+      knowledge_cards: ['id', 'task_id', 'session_id', 'status'],
     };
 
     service = new DatabaseService();

@@ -5,6 +5,11 @@ import type { AgentEvent } from '../shared/agentEvents';
 import type { McpServer } from '../shared/mcp/types';
 import type { DiffPayload } from '../shared/diff/types';
 import type { GitIndexUpdateArgs } from '../shared/git/types';
+import type {
+  KnowledgeCardFilters,
+  KnowledgeInboxFilters,
+  ReviewKnowledgeCandidateArgs,
+} from '../shared/knowledge/types';
 import type { ResourceMetricsSnapshot } from '../shared/performanceTypes';
 
 // Keep preload self-contained: sandboxed preload cannot reliably require local runtime modules.
@@ -231,6 +236,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on(channel, wrapped);
     return () => ipcRenderer.removeListener(channel, wrapped);
   },
+
+  // Knowledge workbench
+  getSessionSummary: (args: { sessionId: string }) =>
+    ipcRenderer.invoke('knowledge:getSessionSummary', args),
+  listKnowledgeCandidates: (args?: { filters?: KnowledgeInboxFilters }) =>
+    ipcRenderer.invoke('knowledge:listCandidates', args),
+  reviewKnowledgeCandidate: (args: ReviewKnowledgeCandidateArgs) =>
+    ipcRenderer.invoke('knowledge:reviewCandidate', args),
+  listKnowledgeCards: (args?: { filters?: KnowledgeCardFilters }) =>
+    ipcRenderer.invoke('knowledge:listCards', args),
+  getKnowledgeOverview: (args?: { filters?: KnowledgeInboxFilters }) =>
+    ipcRenderer.invoke('knowledge:getOverview', args),
 
   // Worktree management
   worktreeCreate: (args: {

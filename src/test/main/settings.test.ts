@@ -9,6 +9,7 @@ vi.mock('electron', () => ({
 import { normalizeSettings } from '../../main/settings';
 import type { AppSettings } from '../../main/settings';
 import { DEFAULT_REVIEW_AGENT, DEFAULT_REVIEW_PROMPT } from '../../shared/reviewPreset';
+import { DEFAULT_KNOWLEDGE_DISTILLATION_PROMPT } from '../../shared/knowledge/distillationPrompt';
 
 /** Minimal valid AppSettings skeleton for normalizeSettings. */
 function makeSettings(overrides?: Partial<AppSettings>): AppSettings {
@@ -229,18 +230,40 @@ describe('normalizeSettings - review preset', () => {
   });
 });
 
-describe('normalizeSettings – terminal settings', () => {
-  it('preserves macOptionIsMeta: true', () => {
+describe('normalizeSettings - knowledge distillation prompt', () => {
+  it('defaults to the shared distillation prompt when missing', () => {
+    const result = normalizeSettings(makeSettings());
+
+    expect(result.knowledge).toEqual({
+      distillationPrompt: DEFAULT_KNOWLEDGE_DISTILLATION_PROMPT,
+    });
+  });
+
+  it('preserves a valid configured distillation prompt', () => {
     const result = normalizeSettings(
       makeSettings({
-        terminal: {
-          fontFamily: '',
-          fontSize: 0,
-          autoCopyOnSelection: false,
-          macOptionIsMeta: true,
-        },
+        knowledge: {
+          distillationPrompt: 'Return compact JSON and prioritize debugging takeaways.',
+        } as any,
       })
     );
-    expect(result.terminal?.macOptionIsMeta).toBe(true);
+
+    expect(result.knowledge).toEqual({
+      distillationPrompt: 'Return compact JSON and prioritize debugging takeaways.',
+    });
+  });
+
+  it('falls back when the configured distillation prompt is blank', () => {
+    const result = normalizeSettings(
+      makeSettings({
+        knowledge: {
+          distillationPrompt: '   ',
+        } as any,
+      })
+    );
+
+    expect(result.knowledge).toEqual({
+      distillationPrompt: DEFAULT_KNOWLEDGE_DISTILLATION_PROMPT,
+    });
   });
 });

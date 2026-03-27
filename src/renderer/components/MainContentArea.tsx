@@ -6,6 +6,9 @@ import ProjectMainView from './ProjectMainView';
 import HomeView from './HomeView';
 import SkillsView from './skills/SkillsView';
 import { McpPage } from './mcp/McpPage';
+import InboxPage from './knowledge/InboxPage';
+import KnowledgePage from './knowledge/KnowledgePage';
+import OverviewPage from './knowledge/OverviewPage';
 import { SettingsPage, type SettingsPageTab } from './SettingsPage';
 import TaskCreationLoading from './TaskCreationLoading';
 import WorkspaceProvisioningOverlay from './WorkspaceProvisioningOverlay';
@@ -16,12 +19,32 @@ import { useFeatureFlag } from '../hooks/useFeatureFlag';
 
 interface MainContentAreaProps {
   showSettingsPage: boolean;
+  showKnowledgeOverview?: boolean;
+  showKnowledgeInbox?: boolean;
+  showKnowledgeLibrary?: boolean;
+  knowledgeInboxSessionId?: string | null;
+  onCloseKnowledgeOverview?: () => void;
+  onCloseKnowledgeInbox?: () => void;
+  onCloseKnowledgeLibrary?: () => void;
+  onOpenKnowledgeInboxFromOverview?: (sessionId: string) => void;
+  onOpenKnowledgeLibraryFromOverview?: (sessionId: string) => void;
+  onOpenKnowledgeSessionFromOverview?: (sessionId: string) => void;
   settingsPageInitialTab?: SettingsPageTab;
   handleCloseSettingsPage?: () => void;
 }
 
 const MainContentArea: React.FC<MainContentAreaProps> = ({
   showSettingsPage,
+  showKnowledgeOverview = false,
+  showKnowledgeInbox = false,
+  showKnowledgeLibrary = false,
+  knowledgeInboxSessionId = null,
+  onCloseKnowledgeOverview,
+  onCloseKnowledgeInbox,
+  onCloseKnowledgeLibrary,
+  onOpenKnowledgeInboxFromOverview,
+  onOpenKnowledgeLibraryFromOverview,
+  onOpenKnowledgeSessionFromOverview,
   settingsPageInitialTab,
   handleCloseSettingsPage,
 }) => {
@@ -91,6 +114,35 @@ const MainContentArea: React.FC<MainContentAreaProps> = ({
 
   if (showMcpView) {
     return <McpPage />;
+  }
+
+  if (showKnowledgeOverview) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <OverviewPage
+          onClose={onCloseKnowledgeOverview}
+          onOpenInbox={onOpenKnowledgeInboxFromOverview}
+          onOpenKnowledge={onOpenKnowledgeLibraryFromOverview}
+          onOpenSession={onOpenKnowledgeSessionFromOverview}
+        />
+      </div>
+    );
+  }
+
+  if (showKnowledgeInbox) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <InboxPage initialSessionId={knowledgeInboxSessionId} onClose={onCloseKnowledgeInbox} />
+      </div>
+    );
+  }
+
+  if (showKnowledgeLibrary) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <KnowledgePage onClose={onCloseKnowledgeLibrary} />
+      </div>
+    );
   }
 
   if (showHomeView) {
