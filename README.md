@@ -1,4 +1,4 @@
-<img alt="Emdash banner" src="https://github.com/user-attachments/assets/a2ecaf3c-9d84-40ca-9a8e-d4f612cc1c6f" />
+<img alt="Overview workspace" src="./docs/public/media/overview.png" />
 
 
 <div align="center" style="margin:24px 0;">
@@ -33,7 +33,7 @@
 
 Emdash is a provider-agnostic desktop app that lets you run multiple coding agents in parallel, each isolated in its own git worktree, either locally or over SSH on a remote machine. We call it an Agentic Development Environment (ADE).
 
-Emdash supports 23 CLI agents, including Claude Code, Qwen Code, Hermes Agent, Amp, and Codex. Users can directly pass Linear, GitHub, or Jira tickets to an agent, review diffs, test changes, create PRs, see CI/CD checks, and merge. 
+Alongside task execution and diff review, this branch adds a more workflow-oriented surface around your daily agent context: an overview dashboard for navigating active work, an inbox for triaging surfaced items, and a knowledge library for revisiting promoted context without losing source traceability.
 
 **Develop on remote servers via SSH**
 
@@ -45,7 +45,20 @@ Connect to remote machines via SSH/SFTP to work with remote codebases. Emdash su
 
 </div>
 
-<img alt="Emdash product" src="./docs/public/media/product.jpeg" />
+## Featured Workflow Surfaces
+
+<div align="center">
+  <img alt="Overview dashboard" src="./docs/public/media/overview.png" width="100%" />
+</div>
+
+<p><strong>Overview</strong> gives you a high-level entry point into active work so you can see status, jump to the right workspace, and keep parallel threads understandable.</p>
+
+<div align="center">
+  <img alt="Inbox triage" src="./docs/public/media/inbox.png" width="48%" />
+  <img alt="Knowledge library" src="./docs/public/media/knowledge.png" width="48%" />
+</div>
+
+<p><strong>Inbox</strong> helps you triage surfaced updates and pending items. <strong>Knowledge</strong> keeps promoted cards and source-linked context available for reuse, so important findings do not disappear into a single task thread.</p>
 
 # Installation
 
