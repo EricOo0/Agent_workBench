@@ -1,7 +1,7 @@
 {
-  "name": "emdash",
+  "name": "agent-workbench",
   "version": "0.4.40",
-  "description": "A cross-platform Electron app that orchestrates multiple coding agents in parallel",
+  "description": "A knowledge-first agentic development environment for turning coding sessions into reusable engineering knowledge",
   "main": "dist/main/main/entry.js",
   "packageManager": "pnpm@10.28.2",
   "scripts": {
@@ -37,8 +37,8 @@
     "openai"
   ],
   "author": {
-    "name": "Emdash Contributors",
-    "email": "support@emdash.sh"
+    "name": "Agent WorkBench Contributors",
+    "email": "support@agentworkbench.app"
   },
   "engines": {
     "node": ">=20.0.0 <23.0.0",
@@ -143,17 +143,17 @@
     "tsconfig-paths": "^3.15.0"
   },
   "build": {
-    "appId": "com.emdash",
-    "productName": "Emdash",
+    "appId": "com.agentworkbench.app",
+    "productName": "Agent WorkBench",
     "directories": {
       "output": "release"
     },
-    "artifactName": "emdash-${arch}.${ext}",
+    "artifactName": "agent-workbench-${arch}.${ext}",
     "publish": [
       {
         "provider": "github",
-        "owner": "generalaction",
-        "repo": "emdash",
+        "owner": "EricOo0",
+        "repo": "Agent_workBench",
         "releaseType": "release"
       }
     ],
