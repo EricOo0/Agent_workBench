@@ -1,5 +1,3 @@
-<img alt="Overview workspace" src="./docs/public/media/overview.png" />
-
 
 <div align="center" style="margin:24px 0;">
   
