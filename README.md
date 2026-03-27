@@ -103,6 +103,12 @@ Connect to remote machines via SSH/SFTP to work with remote codebases. Agent Wor
 
 [![Homebrew](https://img.shields.io/badge/-Homebrew-000000?style=for-the-badge&logo=homebrew&logoColor=FBB040)](https://formulae.brew.sh/cask/emdash)
 > macOS users can also package locally from source using `pnpm run package:mac`
+>
+> Current macOS builds may be unsigned test builds. If macOS blocks first launch, right-click the app and choose `Open`, or run:
+>
+> ```bash
+> xattr -dr com.apple.quarantine "/Applications/Agent WorkBench.app"
+> ```
 
 ### Windows
 - Installer (x64): https://github.com/EricOo0/Agent_workBench/releases/latest/download/agent-workbench-x64.msi
