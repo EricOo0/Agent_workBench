@@ -1,6 +1,6 @@
 {
   "name": "agent-workbench",
-  "version": "0.4.40",
+  "version": "0.5.0",
   "description": "A knowledge-first agentic development environment for turning coding sessions into reusable engineering knowledge",
   "main": "dist/main/main/entry.js",
   "packageManager": "pnpm@10.28.2",

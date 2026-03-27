@@ -13,7 +13,7 @@ interface GitHubRelease {
 
 async function getGithubReleases(): Promise<GitHubRelease[]> {
   try {
-    const response = await fetch('https://api.github.com/repos/generalaction/emdash/releases', {
+    const response = await fetch('https://api.github.com/repos/EricOo0/Agent_workBench/releases', {
       headers: {
         Accept: 'application/vnd.github.v3+json',
         ...(process.env.GITHUB_TOKEN && {
@@ -58,7 +58,7 @@ export async function Changelog() {
         <p>
           No releases found. Check the{' '}
           <a
-            href="https://github.com/generalaction/emdash/releases"
+            href="https://github.com/EricOo0/Agent_workBench/releases"
             target="_blank"
             rel="noopener noreferrer"
             className="underline"

@@ -95,8 +95,8 @@ jobs:
         with:
           name: WINDOWS-BETA-BUILD
           path: |
-            release/emdash-*.exe
-            release/emdash-*.msi
+            release/agent-workbench-*.exe
+            release/agent-workbench-*.msi
             release/*.blockmap
             release/latest*.yml
           if-no-files-found: error
