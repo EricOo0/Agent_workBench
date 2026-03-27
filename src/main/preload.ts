@@ -307,7 +307,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('lifecycle:setup', args),
   lifecycleRunStart: (args: { taskId: string; taskPath: string; projectPath: string }) =>
     ipcRenderer.invoke('lifecycle:run:start', args),
-  lifecycleRunStop: (args: { taskId: string }) => ipcRenderer.invoke('lifecycle:run:stop', args),
+  lifecycleRunStop: (args: {
+    taskId: string;
+    taskPath?: string;
+    projectPath?: string;
+    taskName?: string;
+  }) => ipcRenderer.invoke('lifecycle:run:stop', args),
   lifecycleTeardown: (args: { taskId: string; taskPath: string; projectPath: string }) =>
     ipcRenderer.invoke('lifecycle:teardown', args),
   lifecycleGetState: (args: { taskId: string }) => ipcRenderer.invoke('lifecycle:getState', args),
@@ -1058,6 +1063,9 @@ export interface ElectronAPI {
   }) => Promise<{ success: boolean; skipped?: boolean; error?: string }>;
   lifecycleRunStop: (args: {
     taskId: string;
+    taskPath?: string;
+    projectPath?: string;
+    taskName?: string;
   }) => Promise<{ success: boolean; skipped?: boolean; error?: string }>;
   lifecycleTeardown: (args: {
     taskId: string;

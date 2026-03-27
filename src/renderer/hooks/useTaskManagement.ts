@@ -315,7 +315,12 @@ export function useTaskManagement() {
 
     await Promise.allSettled(
       lifecycleTargets.map((target) =>
-        window.electronAPI.lifecycleRunStop({ taskId: target.taskId })
+        window.electronAPI.lifecycleRunStop({
+          taskId: target.taskId,
+          taskPath: target.taskPath,
+          projectPath: targetProject.path,
+          taskName: target.label,
+        })
       )
     );
 
@@ -451,10 +456,12 @@ export function useTaskManagement() {
   const handleStartCreateTaskFromSidebar = useCallback(
     (project: Project) => {
       const targetProject = projects.find((p) => p.id === project.id) || project;
-      activateProjectView(targetProject);
+      if (!selectedProject || selectedProject.id !== targetProject.id) {
+        activateProjectView(targetProject);
+      }
       openTaskModal(targetProject);
     },
-    [activateProjectView, projects, openTaskModal]
+    [activateProjectView, projects, selectedProject, openTaskModal]
   );
 
   // ---------------------------------------------------------------------------
