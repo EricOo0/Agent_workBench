@@ -75,7 +75,7 @@ describe('SessionSummaryPanel', () => {
           sessionId: 'pty:codex:main:task-1',
           status: 'failed',
           provider: 'codex',
-          promptVersion: 'session-distillation.v2',
+          promptVersion: 'session-distillation.v3',
           startedAt: Date.UTC(2026, 2, 26, 3, 0, 0),
           updatedAt: Date.UTC(2026, 2, 26, 3, 2, 0),
           finishedAt: Date.UTC(2026, 2, 26, 3, 2, 0),
@@ -95,7 +95,7 @@ describe('SessionSummaryPanel', () => {
     expect(markup).toContain('Retry');
     expect(markup).toContain('Failure details');
     expect(markup).toContain('Provider: codex');
-    expect(markup).toContain('Prompt: session-distillation.v2');
+    expect(markup).toContain('Prompt: session-distillation.v3');
     expect(markup).toContain('Raw output');
     expect(markup).toContain('{&quot;unexpected&quot;:&quot;shape&quot;}');
   });
