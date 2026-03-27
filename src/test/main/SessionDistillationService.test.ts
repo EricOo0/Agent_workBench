@@ -197,15 +197,16 @@ describe('SessionDistillationService', () => {
   it('transitions queued -> running -> succeeded', async () => {
     runPrompt.mockResolvedValue(
       JSON.stringify({
-        summary_markdown: '## Summary\n\nParser and tests landed.',
+        summary_markdown: '## Summary\n\nCaptured a reusable workflow and pattern.',
         final_conclusion: 'Ready for review.',
         candidates: [
           {
-            title: 'Structured output parsing',
+            title: 'Structured output parsing pattern',
             card_kind: 'implementation',
-            summary: 'Handle strict JSON and fallback extraction.',
+            summary:
+              'Use a strict JSON parse first, then fall back to fenced-block repair to preserve reusable structured output extraction.',
             body_markdown: '- strict parse\n- repair parse',
-            confidence: 0.88,
+            confidence: 0.92,
             tags: ['parser', 'json'],
             evidence_refs: [
               {
@@ -236,7 +237,7 @@ describe('SessionDistillationService', () => {
       expect.objectContaining({
         id: 'distillation-1',
         status: 'running',
-        promptVersion: 'session-distillation.v2',
+        promptVersion: 'session-distillation.v3',
       })
     );
     expect(upsertSessionDistillation).toHaveBeenNthCalledWith(
@@ -245,7 +246,7 @@ describe('SessionDistillationService', () => {
         id: 'distillation-1',
         status: 'succeeded',
         finishedAt: 5_000,
-        summaryMarkdown: '## Summary\n\nParser and tests landed.',
+        summaryMarkdown: '## Summary\n\nCaptured a reusable workflow and pattern.',
         finalConclusion: 'Ready for review.',
         rawResponse: expect.stringContaining('"summary_markdown"'),
       })
@@ -256,9 +257,11 @@ describe('SessionDistillationService', () => {
         taskId: 'task-1',
         sessionId: 'codex-main-task-1',
         distillationId: 'distillation-1',
-        title: 'Structured output parsing',
-        cardKind: 'implementation',
-        summary: 'Handle strict JSON and fallback extraction.',
+        title: 'Structured output parsing pattern',
+        cardKind: 'pattern',
+        summary:
+          'Use a strict JSON parse first, then fall back to fenced-block repair to preserve reusable structured output extraction.',
+        confidence: 0.92,
       }),
     ]);
   });
@@ -286,11 +289,12 @@ describe('SessionDistillationService', () => {
 {
   "summary_markdown": "## Summary\\n\\nRecovered from fenced JSON.",
   "final_conclusion": "Fallback parser succeeded.",
-  "candidates": [
+      "candidates": [
     {
-      "title": "Fallback extraction",
+      "title": "Fallback extraction principle",
       "card_kind": "decision",
-      "summary": "Recover JSON from surrounding prose.",
+      "summary": "When providers wrap JSON in prose, recover the fenced JSON block instead of failing the whole distillation.",
+      "confidence": 0.85,
       "evidence_refs": [{ "id": "msg-1", "kind": "message" }]
     }
   ]
@@ -308,8 +312,10 @@ describe('SessionDistillationService', () => {
     );
     expect(insertKnowledgeCandidates).toHaveBeenCalledWith([
       expect.objectContaining({
-        title: 'Fallback extraction',
-        summary: 'Recover JSON from surrounding prose.',
+        title: 'Fallback extraction principle',
+        cardKind: 'principle',
+        summary:
+          'When providers wrap JSON in prose, recover the fenced JSON block instead of failing the whole distillation.',
       }),
     ]);
   });
@@ -325,9 +331,11 @@ describe('SessionDistillationService', () => {
         ],
         candidates: [
           {
-            title: 'Evidence-backed candidate',
-            card_kind: 'implementation',
-            summary: 'Carries message refs into storage.',
+            title: 'Evidence-backed storage workflow',
+            card_kind: 'workflow',
+            summary:
+              'Persist the strongest session and message evidence refs alongside each candidate so later review stays auditable.',
+            confidence: 0.9,
             evidence_refs: [
               { id: 'msg-2', kind: 'message', title: 'Agent message' },
               { id: 'conv-1', kind: 'conversation', title: 'Default Conversation' },
@@ -349,11 +357,72 @@ describe('SessionDistillationService', () => {
     );
     expect(insertKnowledgeCandidates).toHaveBeenCalledWith([
       expect.objectContaining({
+        title: 'Evidence-backed storage workflow',
+        cardKind: 'workflow',
         evidenceRefs: [
           expect.objectContaining({ id: 'msg-2', kind: 'message' }),
           expect.objectContaining({ id: 'conv-1', kind: 'conversation' }),
         ],
         sourceCount: 2,
+      }),
+    ]);
+  });
+
+  it('filters low-confidence, low-signal, and duplicate candidates before insert', async () => {
+    runPrompt.mockResolvedValue(
+      JSON.stringify({
+        summary_markdown: '## Summary\n\nOnly one durable candidate survived filtering.',
+        final_conclusion: 'Filtering removed weak candidates.',
+        candidates: [
+          {
+            title: 'Progress update',
+            card_kind: 'workflow',
+            summary: 'Progress update for this task and process record.',
+            confidence: 0.96,
+            evidence_refs: [{ id: 'msg-1', kind: 'message' }],
+          },
+          {
+            title: 'Reusable SOP for distillation review',
+            card_kind: 'sop',
+            summary:
+              'Keep the distillation prompt strict, require evidence refs, and review only high-confidence outputs before promotion.',
+            confidence: 0.91,
+            evidence_refs: [{ id: 'msg-2', kind: 'message' }],
+          },
+          {
+            title: 'Reusable SOP for distillation review',
+            card_kind: 'sop',
+            summary:
+              'Keep the distillation prompt strict, require evidence refs, and review only high-confidence outputs before promotion.',
+            confidence: 0.93,
+            evidence_refs: [{ id: 'msg-2', kind: 'message' }],
+          },
+          {
+            title: 'Bug fix detail card',
+            card_kind: 'debugging',
+            summary: 'Bug fix detail for one parser issue during this session.',
+            confidence: 0.95,
+            evidence_refs: [{ id: 'msg-2', kind: 'message' }],
+          },
+          {
+            title: 'Low confidence workflow card',
+            card_kind: 'workflow',
+            summary: 'A maybe-useful workflow that is not strongly supported.',
+            confidence: 0.62,
+            evidence_refs: [{ id: 'msg-2', kind: 'message' }],
+          },
+        ],
+      })
+    );
+
+    await service.runDistillationForSession('codex-main-task-1');
+
+    expect(insertKnowledgeCandidates).toHaveBeenCalledTimes(1);
+    expect(insertKnowledgeCandidates).toHaveBeenCalledWith([
+      expect.objectContaining({
+        title: 'Reusable SOP for distillation review',
+        cardKind: 'sop',
+        confidence: 0.91,
       }),
     ]);
   });

@@ -20,11 +20,49 @@ import { log } from '../lib/logger';
 import { getAppSettings } from '../settings';
 import { DEFAULT_KNOWLEDGE_DISTILLATION_PROMPT } from '../../shared/knowledge/distillationPrompt';
 
-const DISTILLATION_PROMPT_VERSION = 'session-distillation.v2';
+const DISTILLATION_PROMPT_VERSION = 'session-distillation.v3';
 const DISTILLATION_TIMEOUT_MS = 60_000;
 const MAX_SNAPSHOT_CHARS = 12_000;
 const MAX_MESSAGE_CHARS = 1_500;
 const MAX_MESSAGES_PER_CONVERSATION = 8;
+const MIN_CANDIDATE_CONFIDENCE = 0.8;
+const MIN_TITLE_CHARS = 6;
+const MIN_SUMMARY_CHARS = 20;
+const ALLOWED_CARD_KINDS = new Set([
+  'sop',
+  'workflow',
+  'principle',
+  'pattern',
+  'idea',
+  'constraint',
+]);
+const CARD_KIND_COMPAT_MAP: Record<string, string | null> = {
+  implementation: 'pattern',
+  decision: 'principle',
+  workflow: 'workflow',
+  note: 'constraint',
+  debugging: null,
+};
+const LOW_SIGNAL_PATTERNS = [
+  /progress update/i,
+  /routine update/i,
+  /session summary/i,
+  /task summary/i,
+  /bug fix/i,
+  /debug(ging)? detail/i,
+  /implementation detail/i,
+  /design route/i,
+  /需求/,
+  /设计路线/,
+  /实现过程/,
+  /实现细节/,
+  /修 bug/,
+  /修复 bug/,
+  /排障/,
+  /调试细节/,
+  /过程记录/,
+  /进度更新/,
+];
 
 type DistillationCandidateOutput = {
   title?: unknown;
@@ -269,17 +307,32 @@ export class SessionDistillationService {
   ): KnowledgeCandidateInput[] {
     if (!Array.isArray(value)) return [];
 
+    const seen = new Set<string>();
+
     return value
       .filter(isObject)
       .map((candidate): KnowledgeCandidateInput | null => {
         const title = this.normalizeString(candidate.title);
         const summary = this.normalizeString(candidate.summary);
-        if (!title || !summary) return null;
+        const cardKind = this.normalizeCardKind(
+          (candidate as DistillationCandidateOutput).card_kind
+        );
+        const confidence = this.normalizeConfidence(
+          (candidate as DistillationCandidateOutput).confidence
+        );
+
+        if (!title || !summary || !cardKind || confidence === null) return null;
+        if (!this.isCandidateHighSignal(title, summary, cardKind, confidence)) return null;
 
         const evidenceRefs = this.normalizeEvidenceRefs(
           (candidate as DistillationCandidateOutput).evidence_refs,
           fallbackEvidenceRefs
         );
+        if (evidenceRefs.length === 0) return null;
+
+        const dedupeKey = `${cardKind}::${this.normalizeForDedupe(title)}::${this.normalizeForDedupe(summary)}`;
+        if (seen.has(dedupeKey)) return null;
+        seen.add(dedupeKey);
 
         return {
           id: this.randomId('candidate'),
@@ -287,14 +340,12 @@ export class SessionDistillationService {
           sessionId: source.session.sessionId,
           distillationId,
           title,
-          cardKind: this.normalizeCardKind((candidate as DistillationCandidateOutput).card_kind),
+          cardKind,
           summary,
           bodyMarkdown: this.normalizeString(
             (candidate as DistillationCandidateOutput).body_markdown
           ),
-          confidence: this.normalizeConfidence(
-            (candidate as DistillationCandidateOutput).confidence
-          ),
+          confidence,
           evidenceRefs,
           sourceCount: evidenceRefs.length,
           tags: this.normalizeTags((candidate as DistillationCandidateOutput).tags),
@@ -375,7 +426,14 @@ export class SessionDistillationService {
 
   private normalizeCardKind(value: unknown): string {
     const normalized = this.normalizeString(value);
-    return normalized ?? 'note';
+    if (!normalized) return '';
+
+    const lower = normalized.toLowerCase();
+    const mapped = Object.prototype.hasOwnProperty.call(CARD_KIND_COMPAT_MAP, lower)
+      ? CARD_KIND_COMPAT_MAP[lower]
+      : lower;
+    if (!mapped) return '';
+    return ALLOWED_CARD_KINDS.has(mapped) ? mapped : '';
   }
 
   private normalizeTags(value: unknown): string[] {
@@ -387,7 +445,27 @@ export class SessionDistillationService {
 
   private normalizeConfidence(value: unknown): number | null {
     if (typeof value !== 'number' || Number.isNaN(value)) return null;
-    return Math.max(0, Math.min(1, value));
+    const normalized = Math.max(0, Math.min(1, value));
+    if (normalized < MIN_CANDIDATE_CONFIDENCE) return null;
+    return normalized;
+  }
+
+  private isCandidateHighSignal(
+    title: string,
+    summary: string,
+    cardKind: string,
+    confidence: number
+  ): boolean {
+    if (title.length < MIN_TITLE_CHARS || summary.length < MIN_SUMMARY_CHARS) return false;
+    if (!ALLOWED_CARD_KINDS.has(cardKind)) return false;
+    if (confidence < MIN_CANDIDATE_CONFIDENCE) return false;
+
+    const combined = `${title}\n${summary}`;
+    return !LOW_SIGNAL_PATTERNS.some((pattern) => pattern.test(combined));
+  }
+
+  private normalizeForDedupe(value: string): string {
+    return value.trim().toLowerCase().replace(/\s+/g, ' ');
   }
 
   private normalizeEvidenceKind(value: unknown): KnowledgeEvidenceRef['kind'] | null {
